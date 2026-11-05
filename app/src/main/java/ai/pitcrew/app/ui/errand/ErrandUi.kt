@@ -1,0 +1,177 @@
+package ai.pitcrew.app.ui.errand
+
+import ai.pitcrew.app.domain.Errand
+import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.StepState
+import ai.pitcrew.app.platform.InteractionMode
+import ai.pitcrew.app.ui.components.ButtonKind
+import ai.pitcrew.app.ui.components.ButtonSize
+import ai.pitcrew.app.ui.components.PcButton
+import ai.pitcrew.app.ui.components.PcCard
+import ai.pitcrew.app.ui.components.StatusBadge
+import ai.pitcrew.app.ui.components.Tone
+import ai.pitcrew.app.ui.components.color
+import ai.pitcrew.app.ui.format.hhmm
+import ai.pitcrew.app.ui.theme.PcSpacing
+import ai.pitcrew.app.ui.theme.PcTheme
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+
+fun Errand.kindLabel(): String = when (detail) {
+    is ErrandDetail.LateArrival -> "지각 대응"
+    is ErrandDetail.Pickup -> "경로 픽업"
+}
+
+fun Errand.title(): String = when (val d = detail) {
+    is ErrandDetail.LateArrival -> "${d.placeName ?: "${d.appointment.hhmm()} 약속"} · ${d.delayMinutes}분 늦음"
+    is ErrandDetail.Pickup -> "${d.item} · ${d.store.displayName}"
+}
+
+fun Errand.summary(): String = when (val d = detail) {
+    is ErrandDetail.LateArrival -> buildString {
+        append("예약 ${d.appointment.hhmm()} → ${d.proposedTime.hhmm()}")
+        if (d.companions.isNotEmpty()) append(" · 일행 ${d.companions.size}명 알림")
+    }
+    is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업 · 우회 ${d.store.detourMinutes}분 · 경유지 추가"
+}
+
+fun Errand.statusTone(): Tone = when (state) {
+    ErrandState.AWAITING_APPROVAL -> Tone.ATTENTION
+    ErrandState.IN_PROGRESS -> Tone.POSITIVE
+    ErrandState.COMPLETED -> Tone.ACTIVE
+    ErrandState.DECLINED -> Tone.NEUTRAL
+    ErrandState.FAILED -> Tone.NEGATIVE
+}
+
+fun Errand.statusLabel(): String = when (state) {
+    ErrandState.AWAITING_APPROVAL -> "승인 대기"
+    ErrandState.IN_PROGRESS -> steps.firstOrNull { it.state == StepState.CURRENT }?.title ?: "진행 중"
+    ErrandState.COMPLETED -> "완료"
+    ErrandState.DECLINED -> "거절함"
+    ErrandState.FAILED -> "실패"
+}
+
+@Composable
+fun ErrandCard(
+    errand: Errand,
+    mode: InteractionMode,
+    onOpen: () -> Unit,
+    onApprove: () -> Unit,
+    onDecline: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = PcTheme.colors
+    PcCard(modifier = modifier.fillMaxWidth(), onClick = onOpen) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(errand.kindLabel(), style = PcTheme.type.label, color = colors.textSecondary, modifier = Modifier.weight(1f))
+            StatusBadge(errand.statusLabel(), errand.statusTone())
+        }
+        Spacer(Modifier.height(PcSpacing.s))
+        Text(errand.title(), style = PcTheme.type.title, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(PcSpacing.xs))
+        Text(errand.summary(), style = PcTheme.type.body, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (errand.state == ErrandState.AWAITING_APPROVAL) {
+            Spacer(Modifier.height(PcSpacing.l))
+            ApprovalActions(mode, onApprove, onDecline)
+        }
+    }
+}
+
+/** 주차 중에만 탭으로 승인한다. 주행 중이거나 규제 상태를 모르면 음성 승인 안내만 보인다. */
+@Composable
+fun ApprovalActions(mode: InteractionMode, onApprove: () -> Unit, onDecline: () -> Unit, modifier: Modifier = Modifier) {
+    if (mode == InteractionMode.TOUCH) {
+        Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(PcSpacing.m)) {
+            PcButton("거절", onDecline, kind = ButtonKind.BASIC, size = ButtonSize.LARGE, modifier = Modifier.weight(1f))
+            PcButton("승인", onApprove, kind = ButtonKind.FILLED, size = ButtonSize.LARGE, icon = Icons.Rounded.Check, modifier = Modifier.weight(2f))
+        }
+    } else {
+        Row(
+            modifier.fillMaxWidth().height(80.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(PcSpacing.s),
+        ) {
+            Icon(Icons.Rounded.Mic, contentDescription = null, tint = PcTheme.colors.attention, modifier = Modifier.size(32.dp))
+            Text("주행 중에는 Gleo에게 \"응\"이라고 답해 승인해요", style = PcTheme.type.body, color = PcTheme.colors.textSecondary)
+        }
+    }
+}
+
+@Composable
+fun StepTimeline(errand: Errand, modifier: Modifier = Modifier) {
+    val colors = PcTheme.colors
+    Column(modifier) {
+        errand.steps.forEachIndexed { index, step ->
+            val last = index == errand.steps.lastIndex
+            val tone = when (step.state) {
+                StepState.DONE -> Tone.ACTIVE
+                StepState.CURRENT -> if (errand.state == ErrandState.AWAITING_APPROVAL) Tone.ATTENTION else Tone.POSITIVE
+                StepState.PENDING -> Tone.NEUTRAL
+                StepState.FAILED -> Tone.NEGATIVE
+            }
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                Column(Modifier.width(48.dp).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    StepMarker(step.state, tone)
+                    if (!last) Box(Modifier.width(2.dp).weight(1f).background(colors.divider))
+                }
+                Row(
+                    Modifier.weight(1f).padding(start = PcSpacing.m, bottom = if (last) 0.dp else PcSpacing.l),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Text(
+                        step.title,
+                        style = if (step.state == StepState.CURRENT) PcTheme.type.bodyStrong else PcTheme.type.body,
+                        color = if (step.state == StepState.PENDING) colors.textTertiary else colors.textPrimary,
+                        modifier = Modifier.weight(1f).padding(top = 2.dp),
+                    )
+                    step.at?.let { Text(it.hhmm(), style = PcTheme.type.bodySmall, color = colors.textSecondary, modifier = Modifier.padding(top = 4.dp)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepMarker(state: StepState, tone: Tone) {
+    val colors = PcTheme.colors
+    val c = tone.color(colors)
+    Box(Modifier.padding(top = 6.dp).size(32.dp), contentAlignment = Alignment.Center) {
+        when (state) {
+            StepState.DONE -> Box(Modifier.size(32.dp).background(c, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Check, null, tint = colors.background, modifier = Modifier.size(22.dp))
+            }
+            StepState.FAILED -> Box(Modifier.size(32.dp).background(c, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Close, null, tint = colors.background, modifier = Modifier.size(22.dp))
+            }
+            StepState.CURRENT -> Box(Modifier.size(32.dp).border(3.dp, c, CircleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(12.dp).background(c, CircleShape))
+            }
+            StepState.PENDING -> Box(Modifier.size(24.dp).border(2.dp, colors.textTertiary, CircleShape))
+        }
+    }
+}

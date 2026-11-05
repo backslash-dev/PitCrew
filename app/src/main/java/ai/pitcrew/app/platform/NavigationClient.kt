@@ -2,7 +2,9 @@ package ai.pitcrew.app.platform
 
 import ai.pleos.playground.navi.constants.NaviErrorCode
 import ai.pleos.playground.navi.constants.NavigationStatus
+import ai.pleos.playground.navi.constants.WaypointIndex
 import ai.pleos.playground.navi.data.DestinationInfo
+import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteStartInfo
 import ai.pleos.playground.navi.data.RouteStateInfo
 import ai.pleos.playground.navi.data.TBTInfo
@@ -96,6 +98,24 @@ class NavigationClient(context: Context) : AutoCloseable {
             navi.getDestinationInfo()
             reply.await()
         }
+    }
+
+    /** 경유지 추가는 결과 콜백이 없어 요청이 예외 없이 전달됐는지만 확인한다. 실패는 onError로 로그에 남는다. */
+    fun addWaypoint(name: String, latitude: Double, longitude: Double): Boolean {
+        if (_status.value != SdkStatus.Ready) return false
+        return runCatching {
+            navi.addWaypoint(
+                RequestWaypointInfo(
+                    latitude = latitude,
+                    longitude = longitude,
+                    poiName = name,
+                    waypointIndex = WaypointIndex.FIRST,
+                    poiId = "",
+                    address = "",
+                    poiSubId = "",
+                ),
+            )
+        }.onFailure { Log.w(TAG, "add waypoint failed", it) }.isSuccess
     }
 
     override fun close() {

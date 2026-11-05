@@ -20,6 +20,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PitCrew">
 
+        <!-- 주행 중에는 조작 요소 없는 주행 화면만 보이므로 DO로 선언한다. 미선언 앱은 주행 중 시스템이 가린다 -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -27,6 +28,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
         </activity>
 
         <!-- 문서 표기(함수명)와 에뮬레이터 Gleo 실제 전송(패키지명.함수명)을 모두 받는다 -->

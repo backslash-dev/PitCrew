@@ -1,5 +1,12 @@
 package ai.pitcrew.app.errand
 
+import ai.pitcrew.app.data.mock.InMemoryContactRepository
+import ai.pitcrew.app.data.mock.InMemoryReservationRepository
+import ai.pitcrew.app.data.mock.MockErrandService
+import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.gleo.GleoFunction
 import ai.pitcrew.app.gleo.GleoRequest
 import ai.pitcrew.app.gleo.GleoStatus
@@ -79,8 +86,15 @@ class LateArrivalPlannerTest {
 class LateArrivalHandlerTest {
     private val now = LocalDateTime.of(2026, 11, 5, 18, 40, 0)
     private val route = Destination("강남역", remainTimeSeconds = 45 * 60, remainDistanceMeters = 13_000)
+    private val contacts = InMemoryContactRepository()
+    private val reservations = InMemoryReservationRepository(
+        listOf(Reservation("r1", "온담 한식당", LocalDateTime.of(2026, 11, 5, 19, 0), 3, listOf("c-minsu", "c-seoyeon"))),
+    )
+    private val errands = MockErrandService(addWaypoint = { true }, now = { now }, stepDelayMillis = 0)
 
-    private fun handler(destination: suspend () -> Destination?) = LateArrivalHandler(destination) { now }
+    private fun handler(destination: suspend () -> Destination?) =
+        LateArrivalHandler(destination, errands, reservations, contacts) { now }
+
     private fun request(vararg params: Pair<String, String>) =
         GleoRequest(GleoFunction.NOTIFY_LATE_ARRIVAL, JSONObject(params.toMap()))
 
@@ -92,25 +106,33 @@ class LateArrivalHandlerTest {
     }
 
     @Test
-    fun `늦으면 새 시간 승인을 되묻는다`() = runTest {
+    fun `늦으면 예약과 맞춰 승인 대기 작업을 만들고 되묻는다`() = runTest {
         val response = handler { route }.handle(request("appointmentTime" to "19:00"))
         assertEquals(GleoStatus.ASKING, response.status)
         val data = JSONArray(response.toJson().getString("data")).getJSONObject(0)
+        assertEquals("온담 한식당", data.getString("place"))
         assertEquals(25, data.getInt("delayMinutes"))
         assertEquals("19:30", data.getString("proposedTime"))
-        assertEquals("19:25", data.getString("estimatedArrivalTime"))
+        val errand = errands.errands.value.single()
+        assertEquals(ErrandState.AWAITING_APPROVAL, errand.state)
+        assertEquals(2, (errand.detail as ErrandDetail.LateArrival).companions.size)
     }
 
     @Test
-    fun `제때 도착하면 성공으로 응답한다`() = runTest {
+    fun `제때 도착하면 작업을 만들지 않는다`() = runTest {
         assertEquals(GleoStatus.SUCCESS, handler { route }.handle(request("appointmentTime" to "19:30")).status)
+        assertTrue(errands.errands.value.isEmpty())
     }
 
     @Test
-    fun `승인 후 실행은 아직 지원하지 않는다고 응답한다`() = runTest {
-        val response = handler { route }.handle(request("appointmentTime" to "19:00", "confirmedTime" to "19:30"))
-        assertEquals(GleoStatus.FAIL, response.status)
-        assertEquals("19:30", response.data.single()["confirmedTime"])
+    fun `음성 승인하면 승인한 시간으로 실행하고 성공을 알린다`() = runTest {
+        handler { route }.handle(request("appointmentTime" to "19:00"))
+        val response = handler { route }.handle(request("appointmentTime" to "19:00", "confirmedTime" to "19:40"))
+        assertEquals(GleoStatus.SUCCESS, response.status)
+        val done = errands.errands.value.single()
+        assertEquals(ErrandState.COMPLETED, done.state)
+        assertEquals(ApprovalChannel.VOICE, done.approvedVia)
+        assertEquals(LocalTime.of(19, 40), (done.detail as ErrandDetail.LateArrival).proposedTime)
     }
 
     @Test

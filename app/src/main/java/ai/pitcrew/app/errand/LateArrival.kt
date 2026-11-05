@@ -1,5 +1,12 @@
 package ai.pitcrew.app.errand
 
+import ai.pitcrew.app.data.ContactRepository
+import ai.pitcrew.app.data.ErrandService
+import ai.pitcrew.app.data.ReservationRepository
+import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.gleo.GleoActionHandler
 import ai.pitcrew.app.gleo.GleoFunction
 import ai.pitcrew.app.gleo.GleoRequest
@@ -23,10 +30,13 @@ data class LateArrivalPlan(
 object LateArrivalPlanner {
     private const val PROPOSAL_STEP_MINUTES = 10L
 
+    /** 안내·지연·제안이 같은 값을 쓰도록 도착 시각을 분 단위로 반올림한다. 화면 표시도 이 값을 쓴다. */
+    fun arrivalAt(now: LocalDateTime, remainSeconds: Int): LocalDateTime =
+        now.plusSeconds(remainSeconds.toLong().coerceAtLeast(0) + 30).truncatedTo(ChronoUnit.MINUTES)
+
     fun plan(appointmentTime: LocalTime, now: LocalDateTime, remainSeconds: Int): LateArrivalPlan {
         val appointment = nearestOccurrence(appointmentTime, now)
-        // 안내·지연·제안이 같은 값을 쓰도록 도착 시각을 분 단위로 반올림한다
-        val arrival = now.plusSeconds(remainSeconds.toLong().coerceAtLeast(0) + 30).truncatedTo(ChronoUnit.MINUTES)
+        val arrival = arrivalAt(now, remainSeconds)
         val delayMinutes = Duration.between(appointment, arrival).toMinutes()
         val proposed = if (delayMinutes > 0) roundUp(arrival).toLocalTime() else null
         return LateArrivalPlan(appointment, arrival, delayMinutes, proposed)
@@ -53,13 +63,15 @@ object LateArrivalPlanner {
 
 class LateArrivalHandler(
     private val fetchDestination: suspend () -> Destination?,
+    private val errands: ErrandService,
+    private val reservations: ReservationRepository,
+    private val contacts: ContactRepository,
     private val now: () -> LocalDateTime = LocalDateTime::now,
 ) : GleoActionHandler {
     private val function = GleoFunction.NOTIFY_LATE_ARRIVAL
 
     override suspend fun handle(request: GleoRequest): GleoResponse {
-        val rawAppointment = request.params.optString("appointmentTime")
-        val appointment = parseClockTime(rawAppointment)
+        val appointment = parseClockTime(request.params.optString("appointmentTime"))
             ?: return GleoResponse.asking(
                 function,
                 "The appointment time is required in 24-hour HH:mm format.",
@@ -73,34 +85,67 @@ class LateArrivalHandler(
         } ?: return GleoResponse.fail(function, "There is no active navigation route, so the arrival time is unknown.")
 
         val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
-        val data = plan.toData(destination)
+        val reservation = matchReservation(plan.appointment)
+        val data = plan.toData(reservation)
 
         if (!plan.isLate) {
             return GleoResponse.success(function, "The driver is expected to arrive on time, so no change is needed.", data)
         }
 
         val confirmedTime = parseClockTime(request.params.optString("confirmedTime"))
-            ?: return GleoResponse.asking(
+        val proposedTime = confirmedTime ?: plan.proposedTime!!
+        val companions = reservation?.companionIds.orEmpty().mapNotNull { id -> contacts.contacts.value.firstOrNull { it.id == id } }
+        val errand = errands.propose(
+            ErrandDetail.LateArrival(
+                reservationId = reservation?.id,
+                placeName = reservation?.placeName,
+                appointment = plan.appointment,
+                estimatedArrival = plan.estimatedArrival,
+                delayMinutes = plan.delayMinutes,
+                proposedTime = proposedTime,
+                companions = companions,
+            ),
+        )
+        val place = reservation?.placeName?.let { " at $it" }.orEmpty()
+
+        if (confirmedTime == null) {
+            return GleoResponse.asking(
                 function,
-                "The driver is expected to be ${plan.delayMinutes} minutes late. " +
-                    "User approval is required to change the reservation to ${plan.proposedTime?.toClockTime()} and notify the companions.",
+                "The driver is expected to be ${plan.delayMinutes} minutes late for the reservation$place. " +
+                    "User approval is required to change it to ${proposedTime.toClockTime()} and notify ${companions.size} companions.",
                 data,
             )
+        }
 
-        return GleoResponse.fail(
-            function,
-            "Changing the reservation and notifying companions is not available yet.",
-            listOf(data.first() + ("confirmedTime" to confirmedTime.toClockTime())),
-        )
+        val result = errands.approve(errand.id, ApprovalChannel.VOICE)
+        return when (result.state) {
+            ErrandState.COMPLETED -> GleoResponse.success(
+                function,
+                "The reservation$place was changed to ${proposedTime.toClockTime()} and ${companions.size} companions were notified.",
+                listOf(data.first() + ("confirmedTime" to proposedTime.toClockTime())),
+            )
+            ErrandState.DECLINED -> GleoResponse.fail(function, "The user declined this change on the screen.")
+            else -> GleoResponse.fail(function, "Changing the reservation failed: ${result.failureReason ?: "unknown error"}.")
+        }
     }
 
-    private fun LateArrivalPlan.toData(destination: Destination): List<Map<String, Any>> = listOf(
+    // 말한 시각과 15분 안쪽인 오늘 예약을 같은 약속으로 본다
+    private fun matchReservation(appointment: LocalDateTime): Reservation? =
+        reservations.reservations.value
+            .filter { Duration.between(it.time, appointment).abs() <= MATCH_WINDOW }
+            .minByOrNull { Duration.between(it.time, appointment).abs() }
+
+    private fun LateArrivalPlan.toData(reservation: Reservation?): List<Map<String, Any>> = listOf(
         buildMap {
-            put("destination", destination.name)
+            reservation?.let { put("place", it.placeName) }
             put("appointmentTime", appointment.toLocalTime().toClockTime())
             put("estimatedArrivalTime", estimatedArrival.toLocalTime().toClockTime())
             put("delayMinutes", delayMinutes)
             proposedTime?.let { put("proposedTime", it.toClockTime()) }
         },
     )
+
+    private companion object {
+        val MATCH_WINDOW: Duration = Duration.ofMinutes(15)
+    }
 }
