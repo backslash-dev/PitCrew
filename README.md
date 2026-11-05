@@ -75,12 +75,22 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 - 예약 변경·알림 발송·주문·매장 조회는 서버가 처리한다. 식당·매장·문자 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청 이력은 DB에 남는다.
 - 주행 중에는 조작 요소 없는 주행 화면으로 바뀐다(MainActivity에 DO 선언).
 
+## 시연 영상
+
+```bash
+python3 scripts/demo/record.py /Volumes/T7/pitcrew-captures/demo/take1   # 에뮬레이터·서버 실행 상태에서 장면별 녹화
+python3 scripts/demo/compose.py /Volumes/T7/pitcrew-captures/demo/take1  # 자막·카드 합성 → pitcrew-demo.mp4
+```
+
+녹화 스크립트가 예약을 "지금 + 30분 안팎"으로 맞추고 Gleo에 테스트 입력으로 말을 넣는다. Gleo가 실제로 한 말은 로그에서 뽑아 자막으로 쓰고, Gleo가 기대와 다르게 반응한 장면은 다시 찍는다. 에뮬레이터 시간대는 서울로 고정한다(`settings put global auto_time_zone 0`, `cmd alarm set-timezone Asia/Seoul`).
+
 ## 에뮬레이터 주의 사항
 
 - 내비 경로·ETA가 고정 목업 값이라 주행해도 남은 시간이 줄지 않는다. 지각 시나리오 시연은 이 값을 기준으로 맞춘다.
 - DO(Distraction Optimization) 미선언 앱은 주행 중 시스템이 가린다. DO 허용 여부는 Pleos 심사에서 정해진다.
 - Gleo로 목적지를 정해도 내비가 검색 결과에서 멈출 때가 있다. 그때는 내비에서 안내 시작을 누른다.
 - Gleo 대화 뒤 시스템 UI(시트 온도 빠른 제어)가 반복해서 죽는 경우가 있다. 에뮬레이터를 다시 켜면 돌아온다.
+- 호스트 메모리가 부족하면 시스템 워치독이 에뮬레이터를 재시작한다. AVD RAM은 공식 권장값 4GB로 둔다.
 - 문자 발송(telephony)이 없다. 알림은 서버에서 보낸다.
 - 앱은 AAOS user 10에서 돈다. 파일을 넣을 때는 `adb shell run-as ai.pitcrew.app --user 10 ...`.
 - 음성 인식은 무음이면 스스로 끝나지 않는다. 종료 시점은 앱이 정해야 한다.
