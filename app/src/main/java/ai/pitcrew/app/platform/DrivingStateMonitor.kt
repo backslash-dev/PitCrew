@@ -38,17 +38,37 @@ class DrivingStateMonitor(private val context: Context) : AutoCloseable {
 
     private val uxListener = CarUxRestrictionsManager.OnUxRestrictionsChangedListener(::onUxRestrictions)
 
+    // 리스너 없는 Car.createCar(context)는 차량 서비스가 재시작되면 앱 프로세스를 죽인다.
+    // 리스너로 재연결을 직접 처리하고, 연결은 기다리지 않아 콜드 스타트를 막지 않는다
     fun start() {
         runCatching {
-            val connected = Car.createCar(context) ?: error("car service unavailable")
-            car = connected
-            startGear(connected)
-            startUxRestrictions(connected)
+            car = Car.createCar(context, null, Car.CAR_WAIT_TIMEOUT_DO_NOT_WAIT) { connected, ready ->
+                if (ready) onCarReady(connected) else onCarLost()
+            }
+        }.onFailure {
+            Log.e(TAG, "car service unavailable", it)
+            _status.value = SdkStatus.Failed(it.message ?: it.javaClass.simpleName)
+        }
+    }
+
+    private fun onCarReady(car: Car) {
+        runCatching {
+            startGear(car)
+            startUxRestrictions(car)
             _status.value = SdkStatus.Ready
         }.onFailure {
             Log.e(TAG, "driving state unavailable", it)
             _status.value = SdkStatus.Failed(it.message ?: it.javaClass.simpleName)
         }
+    }
+
+    // 재연결 전까지는 규제 상태를 모르므로 음성 전용으로 떨어진다
+    private fun onCarLost() {
+        Log.w(TAG, "car service disconnected, waiting for reconnect")
+        propertyManager = null
+        uxManager = null
+        _state.value = DrivingState()
+        _status.value = SdkStatus.Connecting
     }
 
     @Suppress("DEPRECATION")
