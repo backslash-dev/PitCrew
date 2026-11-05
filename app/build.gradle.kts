@@ -36,6 +36,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -63,4 +64,5 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.json)
 }

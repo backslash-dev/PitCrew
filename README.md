@@ -51,6 +51,21 @@ cd server && pnpm typecheck && pnpm test
 | 음성 인식 | SpeechToText 3.3.1 (ON_DEVICE) | `STT_SERVICE` |
 | 음성 안내 | TextToSpeech 3.3.1 (ON_DEVICE) | `TTS_SERVICE` |
 
+## Gleo 연동
+
+`app/src/main/assets/schema.json`에 함수 2개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`)를 정의했고, `GleoActionReceiver`가 방송(component `service`)으로 받는다. 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
+
+마이크 없이 Gleo에 발화를 넣을 수 있다(에뮬레이터 Gleo의 테스트 입력).
+
+```bash
+adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱으로 11시 예약 지각 처리해줘'"
+```
+
+- Gleo는 action을 문서와 달리 `<패키지명>.<함수명>`으로 보낸다. 매니페스트는 두 형태를 모두 받는다.
+- "일행에게 알려줘"처럼 문자·전화로 들리는 말은 Gleo 기본 메시지 기능으로 간다. 앱 이름("피트크루 앱으로 …")을 넣으면 안정적이다.
+- 강제 종료(force-stop)되었거나 설치 후 한 번도 실행하지 않은 앱에는 방송이 오지 않는다. 설치 후 한 번은 앱을 열어야 한다.
+- Gleo는 7초 안에 콜백을 기다린다. 앱은 5초 예산으로 응답한다.
+
 ## 에뮬레이터 주의 사항
 
 - 내비 경로·ETA가 고정 목업 값이라 주행해도 남은 시간이 줄지 않는다. 지각 시나리오 시연은 이 값을 기준으로 맞춘다.

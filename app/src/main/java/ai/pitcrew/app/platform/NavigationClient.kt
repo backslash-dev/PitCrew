@@ -12,9 +12,14 @@ import ai.pleos.playground.navi.helper.NaviHelper
 import ai.pleos.playground.navi.helper.listener.NaviHelperEventListener
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 
 data class Destination(
     val name: String,
@@ -32,6 +37,8 @@ class NavigationClient(context: Context) : AutoCloseable {
     private val _destination = MutableStateFlow<Destination?>(null)
     val destination: StateFlow<Destination?> = _destination.asStateFlow()
 
+    private val destinationReplies = MutableSharedFlow<Destination?>(extraBufferCapacity = 1)
+
     private val listener = object : NaviHelperEventListener {
         override fun onRouteStarted(info: RouteStartInfo) = refreshDestination()
         override fun onRoutingCompleted() = refreshDestination()
@@ -39,7 +46,9 @@ class NavigationClient(context: Context) : AutoCloseable {
         override fun onRouteEnded() { _destination.value = null }
         override fun onDestinationChanged() = refreshDestination()
         override fun onDestinationInfo(info: DestinationInfo) {
-            _destination.value = info.toDestination()
+            val destination = info.toDestination()
+            _destination.value = destination
+            destinationReplies.tryEmit(destination)
         }
         override fun onWayPointInfo(list: List<WaypointInfo>) {}
         override fun onRouteStateInfo(info: RouteStateInfo) {}
@@ -73,6 +82,20 @@ class NavigationClient(context: Context) : AutoCloseable {
     fun refreshDestination() {
         if (_status.value != SdkStatus.Ready) return
         runCatching { navi.getDestinationInfo() }.onFailure { Log.w(TAG, "destination query failed", it) }
+    }
+
+    /**
+     * 내비에 현재 목적지를 물어 응답을 기다린다. 경로가 없으면 null.
+     * @throws SdkUnavailableException 내비 SDK 초기화에 실패했을 때
+     */
+    suspend fun fetchDestination(): Destination? {
+        val status = status.first { it != SdkStatus.Connecting }
+        if (status is SdkStatus.Failed) throw SdkUnavailableException("navigation", status.reason)
+        return coroutineScope {
+            val reply = async(start = CoroutineStart.UNDISPATCHED) { destinationReplies.first() }
+            navi.getDestinationInfo()
+            reply.await()
+        }
     }
 
     override fun close() {

@@ -1,0 +1,56 @@
+{
+  "packageName": "ai.pitcrew.app",
+  "appDescription": "An in-car errand agent that handles running late for reservations and ordering pickups along the route, based on the navigation arrival time.",
+  "invokeWord": "피트크루",
+  "version": "0.1.0",
+  "actionCalls": [
+    {
+      "type": "function",
+      "function": {
+        "name": "NOTIFY_LATE_ARRIVAL",
+        "description": "Handle the situation where the driver is running late for an appointment or reservation by estimating the delay from the navigation arrival time and rescheduling it to a new time the user approves.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "appointmentTime": {
+              "type": "string",
+              "description": "Originally scheduled time of the appointment or reservation in 24-hour HH:mm format."
+            },
+            "confirmedTime": {
+              "type": "string",
+              "description": "New reservation time the user explicitly approved after being asked, in 24-hour HH:mm format."
+            }
+          },
+          "required": ["appointmentTime"]
+        },
+        "component": "service"
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "ORDER_PICKUP_ON_ROUTE",
+        "description": "Order food or drinks for pickup at a store along the current navigation route, timed to the driver's arrival.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "item": {
+              "type": "string",
+              "description": "Name of the food or drink the user wants to pick up."
+            },
+            "storeName": {
+              "type": "string",
+              "description": "Name or brand of the store the user wants to order from."
+            },
+            "confirmed": {
+              "type": "boolean",
+              "description": "Whether the user explicitly approved the proposed store and pickup time after being asked."
+            }
+          },
+          "required": ["item"]
+        },
+        "component": "service"
+      }
+    }
+  ]
+}

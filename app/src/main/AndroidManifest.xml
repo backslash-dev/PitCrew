@@ -28,5 +28,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 문서 표기(함수명)와 에뮬레이터 Gleo 실제 전송(패키지명.함수명)을 모두 받는다 -->
+        <receiver
+            android:name=".gleo.GleoActionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="NOTIFY_LATE_ARRIVAL" />
+                <action android:name="ai.pitcrew.app.NOTIFY_LATE_ARRIVAL" />
+                <action android:name="ORDER_PICKUP_ON_ROUTE" />
+                <action android:name="ai.pitcrew.app.ORDER_PICKUP_ON_ROUTE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

@@ -2,28 +2,35 @@ package ai.pitcrew.app.platform
 
 import android.content.Context
 
+/** SDK는 처음 쓸 때 시작한다. Gleo 방송으로 깨어난 경우 필요한 SDK만 연결해 응답 시간을 줄인다. */
 class PlatformServices(context: Context) : AutoCloseable {
     private val appContext = context.applicationContext
+    private val started = mutableListOf<AutoCloseable>()
 
-    val drivingState = DrivingStateMonitor(appContext)
-    val battery = BatteryClient(appContext)
-    val navigation = NavigationClient(appContext)
-    val location = LocationClient(appContext)
-    val voiceInput = VoiceInput(appContext)
-    val voiceOutput = VoiceOutput(appContext)
+    val drivingState by component { DrivingStateMonitor(appContext).also { it.start() } }
+    val battery by component { BatteryClient(appContext).also { it.start() } }
+    val navigation by component { NavigationClient(appContext).also { it.start() } }
+    val location by component { LocationClient(appContext).also { it.start() } }
+    val voiceInput by component { VoiceInput(appContext).also { it.start() } }
+    val voiceOutput by component { VoiceOutput(appContext).also { it.start() } }
 
-    private val components: List<AutoCloseable> = listOf(drivingState, battery, navigation, location, voiceInput, voiceOutput)
-
-    fun start() {
-        drivingState.start()
-        battery.start()
-        navigation.start()
-        location.start()
-        voiceInput.start()
-        voiceOutput.start()
+    fun startAll() {
+        drivingState
+        battery
+        navigation
+        location
+        voiceInput
+        voiceOutput
     }
 
     override fun close() {
-        components.forEach { runCatching { it.close() } }
+        synchronized(started) {
+            started.forEach { runCatching { it.close() } }
+            started.clear()
+        }
+    }
+
+    private fun <T : AutoCloseable> component(create: () -> T) = lazy {
+        create().also { synchronized(started) { started += it } }
     }
 }

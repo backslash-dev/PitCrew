@@ -17,12 +17,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        platform.startAll()
         if (!platform.location.hasPermission()) {
             locationPermission.launch(LocationClient.PERMISSION)
         }
         setContent {
             PitCrewTheme {
-                DiagnosticsScreen(platform)
+                DiagnosticsScreen(platform, (application as PitCrewApplication).gleo)
             }
         }
     }

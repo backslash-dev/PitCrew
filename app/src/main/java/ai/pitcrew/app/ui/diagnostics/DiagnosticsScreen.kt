@@ -1,5 +1,7 @@
 package ai.pitcrew.app.ui.diagnostics
 
+import ai.pitcrew.app.gleo.GleoActionDispatcher
+import ai.pitcrew.app.gleo.GleoStatus
 import ai.pitcrew.app.platform.PlatformServices
 import ai.pitcrew.app.platform.SdkStatus
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
-fun DiagnosticsScreen(platform: PlatformServices) {
+fun DiagnosticsScreen(platform: PlatformServices, gleo: GleoActionDispatcher) {
     val drivingStatus by platform.drivingState.status.collectAsStateWithLifecycle()
     val driving by platform.drivingState.state.collectAsStateWithLifecycle()
     val batteryStatus by platform.battery.status.collectAsStateWithLifecycle()
@@ -40,6 +42,7 @@ fun DiagnosticsScreen(platform: PlatformServices) {
     val sttError by platform.voiceInput.lastError.collectAsStateWithLifecycle()
     val ttsStatus by platform.voiceOutput.status.collectAsStateWithLifecycle()
     val speaking by platform.voiceOutput.speaking.collectAsStateWithLifecycle()
+    val gleoExchange by gleo.lastExchange.collectAsStateWithLifecycle()
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
@@ -90,6 +93,14 @@ fun DiagnosticsScreen(platform: PlatformServices) {
                 detail = if (speaking) "재생 중" else "대기",
                 actionLabel = "안내 재생",
                 onAction = { platform.voiceOutput.speak("피트크루 준비됐어요.") },
+            )
+            SdkCard(
+                title = "Gleo · 최근 호출",
+                status = gleoExchange?.response
+                    ?.takeIf { it.status == GleoStatus.FAIL }
+                    ?.let { SdkStatus.Failed(it.status.wire) }
+                    ?: SdkStatus.Ready,
+                detail = gleoExchange?.let { "${it.function} ${it.params}\n→ ${it.response.status.wire}: ${it.response.message}" } ?: "호출 없음",
             )
         }
     }
