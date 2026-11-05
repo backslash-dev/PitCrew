@@ -4,11 +4,8 @@ import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.errand.LateArrivalPlanner
 import ai.pitcrew.app.platform.Destination
-import ai.pitcrew.app.ui.components.StatusBadge
-import ai.pitcrew.app.ui.components.Tone
-import ai.pitcrew.app.ui.components.color
-import ai.pitcrew.app.ui.errand.statusLabel
-import ai.pitcrew.app.ui.errand.statusTone
+import ai.pitcrew.app.ui.errand.outcomeLine
+import ai.pitcrew.app.ui.errand.progressLine
 import ai.pitcrew.app.ui.errand.title
 import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.format.minutesLabel
@@ -47,7 +44,7 @@ fun DrivingScreen(destination: Destination?, errands: List<Errand>, now: LocalDa
         Modifier.fillMaxSize().background(colors.background).padding(horizontal = 64.dp, vertical = 48.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        StatusBadge("주행 중 · 음성으로만 조작", Tone.ATTENTION)
+        Spacer(Modifier.height(PcSpacing.xs))
 
         Column {
             if (destination != null) {
@@ -64,8 +61,10 @@ fun DrivingScreen(destination: Destination?, errands: List<Errand>, now: LocalDa
             }
             if (focus != null) {
                 Spacer(Modifier.height(PcSpacing.xxl))
-                Text(focus.statusLabel(), style = PcTheme.type.titleSmall, color = focus.statusTone().color(colors))
                 Text(focus.title(), style = PcTheme.type.titleLarge, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                (focus.progressLine() ?: focus.outcomeLine())?.let {
+                    Text(it, style = PcTheme.type.titleSmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
 

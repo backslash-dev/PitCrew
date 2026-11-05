@@ -9,7 +9,6 @@ import ai.pitcrew.app.ui.components.ButtonKind
 import ai.pitcrew.app.ui.components.ButtonSize
 import ai.pitcrew.app.ui.components.PcButton
 import ai.pitcrew.app.ui.components.PcCard
-import ai.pitcrew.app.ui.components.StatusBadge
 import ai.pitcrew.app.ui.components.Tone
 import ai.pitcrew.app.ui.components.color
 import ai.pitcrew.app.ui.format.hhmm
@@ -60,20 +59,28 @@ fun Errand.summary(): String = when (val d = detail) {
     is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업 · 우회 ${d.store.detourMinutes}분 · 경유지 추가"
 }
 
-fun Errand.statusTone(): Tone = when (state) {
-    ErrandState.AWAITING_APPROVAL -> Tone.ATTENTION
-    ErrandState.IN_PROGRESS -> Tone.POSITIVE
-    ErrandState.COMPLETED -> Tone.ACTIVE
-    ErrandState.DECLINED -> Tone.NEUTRAL
-    ErrandState.FAILED -> Tone.NEGATIVE
+/** 진행 중일 때 지금 하는 단계. 승인 단계는 세지 않는다. */
+fun Errand.progressLine(): String? {
+    if (state != ErrandState.IN_PROGRESS) return null
+    val work = steps.drop(1)
+    val index = work.indexOfFirst { it.state == StepState.CURRENT }
+    if (index < 0) return null
+    return "${work[index].title.substringBefore(" · ")} 중 · ${index + 1}/${work.size}"
 }
 
-fun Errand.statusLabel(): String = when (state) {
-    ErrandState.AWAITING_APPROVAL -> "승인 대기"
-    ErrandState.IN_PROGRESS -> steps.firstOrNull { it.state == StepState.CURRENT }?.title ?: "진행 중"
-    ErrandState.COMPLETED -> "완료"
-    ErrandState.DECLINED -> "거절함"
-    ErrandState.FAILED -> "실패"
+/** 끝난 작업의 결과 문장. 진행 중이거나 승인 전이면 null. */
+fun Errand.outcomeLine(): String? = when (state) {
+    ErrandState.COMPLETED -> when (val d = detail) {
+        is ErrandDetail.LateArrival -> buildString {
+            append("예약을 ${d.proposedTime.hhmm()}에 다시 잡았어요")
+            if (d.companions.isNotEmpty()) append(" · 일행 ${d.companions.size}명에게 알렸어요")
+        }
+        is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업으로 주문하고 경유지에 추가했어요"
+    }
+    ErrandState.FAILED -> steps.firstOrNull { it.state == StepState.FAILED }
+        ?.let { "${it.title.substringBefore(" · ")}에 실패했어요" } ?: "처리하지 못했어요"
+    ErrandState.DECLINED -> "거절해서 진행하지 않았어요"
+    else -> null
 }
 
 @Composable
@@ -87,14 +94,18 @@ fun ErrandCard(
 ) {
     val colors = PcTheme.colors
     PcCard(modifier = modifier.fillMaxWidth(), onClick = onOpen) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(errand.kindLabel(), style = PcTheme.type.label, color = colors.textSecondary, modifier = Modifier.weight(1f))
-            StatusBadge(errand.statusLabel(), errand.statusTone())
-        }
+        Text(errand.kindLabel(), style = PcTheme.type.label, color = colors.textSecondary)
         Spacer(Modifier.height(PcSpacing.s))
         Text(errand.title(), style = PcTheme.type.title, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(PcSpacing.xs))
-        Text(errand.summary(), style = PcTheme.type.body, color = colors.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        val progress = errand.progressLine()
+        Text(
+            progress ?: errand.summary(),
+            style = if (progress != null) PcTheme.type.bodyStrong else PcTheme.type.body,
+            color = if (progress != null) colors.textPrimary else colors.textSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
         if (errand.state == ErrandState.AWAITING_APPROVAL) {
             Spacer(Modifier.height(PcSpacing.l))
             ApprovalActions(mode, onApprove, onDecline)

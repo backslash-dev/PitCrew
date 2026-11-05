@@ -12,7 +12,6 @@ import ai.pitcrew.app.ui.components.ListRow
 import ai.pitcrew.app.ui.components.PcCard
 import ai.pitcrew.app.ui.components.ScreenHeader
 import ai.pitcrew.app.ui.components.SectionHeader
-import ai.pitcrew.app.ui.components.StatusBadge
 import ai.pitcrew.app.ui.components.Tone
 import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.format.minutesLabel
@@ -51,9 +50,7 @@ fun ErrandDetailScreen(
     onDecline: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
-        ScreenHeader(errand?.kindLabel() ?: "작업", onBack = onBack, actions = {
-            errand?.let { StatusBadge(it.statusLabel(), it.statusTone()) }
-        })
+        ScreenHeader(errand?.kindLabel() ?: "작업", onBack = onBack)
         if (errand == null) {
             EmptyState("작업을 찾을 수 없어요", "이미 정리되었을 수 있어요.", icon = Icons.Rounded.SearchOff)
             return@Column
@@ -70,9 +67,13 @@ fun ErrandDetailScreen(
                     SectionHeader("진행")
                     Spacer(Modifier.height(PcSpacing.s))
                     StepTimeline(errand)
-                    errand.failureReason?.let {
-                        Spacer(Modifier.height(PcSpacing.m))
-                        Text(it, style = PcTheme.type.body, color = PcTheme.colors.negative)
+                    errand.outcomeLine()?.let {
+                        Spacer(Modifier.height(PcSpacing.l))
+                        Text(
+                            it,
+                            style = PcTheme.type.bodyStrong,
+                            color = if (errand.state == ErrandState.FAILED) PcTheme.colors.negative else PcTheme.colors.textPrimary,
+                        )
                     }
                 }
             }

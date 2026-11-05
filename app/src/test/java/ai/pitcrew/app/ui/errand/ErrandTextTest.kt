@@ -1,0 +1,74 @@
+package ai.pitcrew.app.ui.errand
+
+import ai.pitcrew.app.data.mock.MockErrandService
+import ai.pitcrew.app.data.mock.MockStoreCatalog
+import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.Contact
+import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.StepState
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+import java.time.LocalDateTime
+import java.time.LocalTime
+
+class ErrandTextTest {
+    private val now = LocalDateTime.of(2026, 11, 5, 23, 10)
+    private val late = ErrandDetail.LateArrival(
+        reservationId = "r1",
+        placeName = "온담 한식당",
+        appointment = LocalDateTime.of(2026, 11, 5, 23, 40),
+        estimatedArrival = LocalDateTime.of(2026, 11, 5, 23, 54),
+        delayMinutes = 14,
+        proposedTime = LocalTime.of(0, 0),
+        companions = listOf(Contact("c1", "김민수", "010-0000-0000"), Contact("c2", "이서연", "010-0000-0001")),
+    )
+    private val pickup = ErrandDetail.Pickup("아메리카노", MockStoreCatalog.DEFAULT_STORES.first(), LocalTime.of(23, 35))
+
+    @Test
+    fun `승인 전에는 진행·결과 문장이 없다`() {
+        val errand = MockErrandService(addWaypoint = { true }, now = { now }).propose(late)
+        assertNull(errand.progressLine())
+        assertNull(errand.outcomeLine())
+    }
+
+    @Test
+    fun `진행 중이면 단계 이름 앞부분과 순서를 보여준다`() {
+        val errand = MockErrandService(addWaypoint = { true }, now = { now }).propose(late)
+        val inProgress = errand.copy(
+            state = ErrandState.IN_PROGRESS,
+            steps = errand.steps.mapIndexed { i, s ->
+                when (i) {
+                    0, 1 -> s.copy(state = StepState.DONE)
+                    2 -> s.copy(state = StepState.CURRENT)
+                    else -> s
+                }
+            },
+        )
+        assertEquals("변경 확정 중 · 2/3", inProgress.progressLine())
+    }
+
+    @Test
+    fun `완료하면 결과를 문장으로 말한다`() = runTest {
+        val service = MockErrandService(addWaypoint = { true }, now = { now }, stepDelayMillis = 0)
+        val done = service.approve(service.propose(late).id, ApprovalChannel.TOUCH)
+        assertEquals("예약을 00:00에 다시 잡았어요 · 일행 2명에게 알렸어요", done.outcomeLine())
+    }
+
+    @Test
+    fun `실패하면 실패한 단계를 말한다`() = runTest {
+        val service = MockErrandService(addWaypoint = { false }, now = { now }, stepDelayMillis = 0)
+        val failed = service.approve(service.propose(pickup).id, ApprovalChannel.VOICE)
+        assertEquals("경유지 추가에 실패했어요", failed.outcomeLine())
+    }
+
+    @Test
+    fun `거절하면 진행하지 않았다고 말한다`() {
+        val service = MockErrandService(addWaypoint = { true }, now = { now })
+        val id = service.propose(pickup).id
+        service.decline(id)
+        assertEquals("거절해서 진행하지 않았어요", service.errands.value.single().outcomeLine())
+    }
+}

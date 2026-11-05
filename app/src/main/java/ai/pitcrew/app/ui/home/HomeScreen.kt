@@ -7,17 +7,13 @@ import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.errand.LateArrivalPlanner
 import ai.pitcrew.app.platform.Destination
 import ai.pitcrew.app.platform.DrivingState
-import ai.pitcrew.app.platform.Gear
-import ai.pitcrew.app.platform.InteractionMode
 import ai.pitcrew.app.ui.components.Hairline
 import ai.pitcrew.app.ui.components.ListRow
 import ai.pitcrew.app.ui.components.PcCard
 import ai.pitcrew.app.ui.components.SectionHeader
-import ai.pitcrew.app.ui.components.StatusBadge
 import ai.pitcrew.app.ui.components.TextAction
-import ai.pitcrew.app.ui.components.Tone
 import ai.pitcrew.app.ui.errand.ErrandCard
-import ai.pitcrew.app.ui.errand.statusLabel
+import ai.pitcrew.app.ui.errand.outcomeLine
 import ai.pitcrew.app.ui.errand.title
 import ai.pitcrew.app.ui.format.distanceLabel
 import ai.pitcrew.app.ui.format.hhmm
@@ -73,8 +69,7 @@ fun HomeScreen(state: HomeState, actions: HomeActions, width: WindowWidth) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
         Row(Modifier.fillMaxWidth().height(100.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("오늘의 이동", style = PcTheme.type.titleLarge, color = PcTheme.colors.textPrimary, modifier = Modifier.weight(1f))
-            DriveBadge(state.driving)
+            Text("오늘의 이동", style = PcTheme.type.titleLarge, color = PcTheme.colors.textPrimary)
         }
         when (width) {
             WindowWidth.EXPANDED -> Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
@@ -100,17 +95,6 @@ fun HomeScreen(state: HomeState, actions: HomeActions, width: WindowWidth) {
         }
         Spacer(Modifier.height(PcSpacing.l))
     }
-}
-
-@Composable
-fun DriveBadge(driving: DrivingState) {
-    val label = when {
-        driving.requiresDistractionOptimization == true -> "주행 중 · 음성으로만"
-        driving.requiresDistractionOptimization == false && driving.gear == Gear.PARK -> "주차 중"
-        driving.requiresDistractionOptimization == false -> "정차 중"
-        else -> "차량 연결 중"
-    }
-    StatusBadge(label, if (driving.interactionMode == InteractionMode.TOUCH) Tone.NEUTRAL else Tone.ATTENTION)
 }
 
 @Composable
@@ -175,7 +159,7 @@ private fun WorkPanel(state: HomeState, actions: HomeActions, modifier: Modifier
             recent.forEach { errand ->
                 ListRow(
                     errand.title(),
-                    supporting = "${errand.statusLabel()} · ${relativeLabel(errand.finishedAt ?: errand.createdAt, state.now)}",
+                    supporting = "${errand.outcomeLine().orEmpty()} · ${relativeLabel(errand.finishedAt ?: errand.createdAt, state.now)}",
                     leading = if (errand.state == ErrandState.COMPLETED) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
                     onClick = { actions.openErrand(errand.id) },
                 )
