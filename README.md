@@ -5,7 +5,7 @@
 | 경로 | 내용 |
 | --- | --- |
 | `app/` | Pleos Connect(AAOS, Android 14) 앱. Kotlin · Jetpack Compose |
-| `server/` | 일행·예약·매장·주문·알림 API. Node · TypeScript · Fastify · MySQL |
+| `server/` | 일행·예약·매장·주문·알림·충전소·줄서기 API. Node · TypeScript · Fastify · MySQL |
 | `scripts/` | 에뮬레이터 실행, Virtual Console(차량 상태 주입) 보조 스크립트 |
 
 ## 요구 사항
@@ -55,7 +55,7 @@ cd server && pnpm typecheck && pnpm test
 
 ## Gleo 연동
 
-`app/src/main/assets/schema.json`에 함수 2개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`)를 정의했고, `GleoActionReceiver`가 방송(component `service`)으로 받는다. 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
+`app/src/main/assets/schema.json`에 함수 3개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`, `CANCEL_LAST_ERRAND`)를 정의했고(규격상 최대 3개), `GleoActionReceiver`가 방송(component `service`)으로 받는다. 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
 
 마이크 없이 Gleo에 발화를 넣을 수 있다(에뮬레이터 Gleo의 테스트 입력).
 
@@ -72,7 +72,12 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 
 - 지각 대응, 경로상 픽업: Gleo 음성 또는 주차 중 앱의 "말로 시키기"(STT)로 요청하고, 주행 중에는 음성, 주차 중에는 화면 탭으로 승인한다.
 - 픽업 매장은 후보 중에서 바꿀 수 있고, 매장 3분·800m 이내에 다가가면 TTS로 안내한다.
-- 예약 변경·알림 발송·주문·매장 조회는 서버가 처리한다. 식당·매장·문자 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청 이력은 DB에 남는다.
+- 먼저 묻기(설정에서 끌 수 있음): 1분마다 경로·배터리·주문 이력을 보고 PitCrew가 TTS로 먼저 묻고, 앱이 직접 "응/아니"를 듣는다. 답이 없으면 카드로 남는다.
+  - 늦음 감지: 지금 경로로 3시간 안 예약에 5분 넘게 늦으면 예약 변경을 제안한다. 한 번 미룬 예약에 또 늦으면 "한 번 더 미뤘어요" 안내로 다시 제안한다.
+  - 충전 + 줄서기: 배터리 20% 이하이면 빈자리 있는 경로상 충전소와, 충전 시간(80%까지, 차량 용량 가정값)에 맞는 근처 식당 줄서기를 제안한다. 주차 중에는 "충전하면서 밥 먹을래"로도 시킨다.
+  - 단골 루틴: 최근 14일 중 이틀 넘게 지금 시간대(±1시간)에 같은 메뉴를 픽업했으면 "오늘도 주문할까요?"를 묻는다.
+- 되돌리기: 끝낸 지 3분 안의 작업은 Gleo("피트크루 앱으로 방금 거 취소해"), 앱 음성, 화면 버튼으로 되돌린다. 예약은 원래 시각으로 돌리고 일행에게 정정 안내를 보내며, 주문·줄서기는 취소하고 넣었던 경유지를 뺀다.
+- 예약 변경·알림 발송·주문·줄서기·매장/충전소 조회는 서버가 처리한다. 식당·매장·줄서기·문자 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청·취소 이력은 DB에 남는다.
 - 주행 중에는 조작 요소 없는 주행 화면으로 바뀐다(MainActivity에 DO 선언).
 
 ## 시연 영상
@@ -85,6 +90,14 @@ python3 scripts/demo/compose.py /Volumes/T7/pitcrew-captures/demo/take1  # 자�
 녹화 스크립트가 예약을 "지금 + 30분 안팎"으로 맞추고 Gleo에 테스트 입력으로 말을 넣는다. Gleo가 실제로 한 말은 로그에서 뽑아 자막으로 쓰고, Gleo가 기대와 다르게 반응한 장면은 다시 찍는다. 에뮬레이터 시간대는 서울로 고정한다(`settings put global auto_time_zone 0`, `cmd alarm set-timezone Asia/Seoul`).
 
 ## 에뮬레이터 주의 사항
+
+- 마이크 없이 먼저 묻기를 확인하려면 debug 빌드 전용 방송을 쓴다(adb shell만 보낼 수 있음).
+
+  ```bash
+  adb shell am broadcast -a ai.pitcrew.app.debug.CHECK_NOW -n ai.pitcrew.app/.debug.DebugVoiceReceiver
+  adb shell am broadcast -a ai.pitcrew.app.debug.ANSWER --es text 응 -n ai.pitcrew.app/.debug.DebugVoiceReceiver
+  ```
+- 에뮬레이터 ETA가 고정이라 "또 늦음"은 예약 시각을 앞당겨 재현한다.
 
 - 내비 경로·ETA가 고정 목업 값이라 주행해도 남은 시간이 줄지 않는다. 지각 시나리오 시연은 이 값을 기준으로 맞춘다.
 - DO(Distraction Optimization) 미선언 앱은 주행 중 시스템이 가린다. DO 허용 여부는 Pleos 심사에서 정해진다.
