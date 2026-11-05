@@ -6,6 +6,7 @@ core-ktx = "1.15.0"
 activity-compose = "1.9.3"
 lifecycle = "2.8.7"
 compose-bom = "2025.01.01"
+navigation = "2.8.5"
 junit = "4.13.2"
 json = "20250517"
 pleos-vehicle = "2.3.2"
@@ -26,6 +27,8 @@ compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
+compose-material-icons = { module = "androidx.compose.material:material-icons-extended" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigation" }
 junit = { module = "junit:junit", version.ref = "junit" }
 json = { module = "org.json:json", version.ref = "json" }
 pleos-vehicle = { module = "ai.pleos.playground:Vehicle", version.ref = "pleos-vehicle" }
