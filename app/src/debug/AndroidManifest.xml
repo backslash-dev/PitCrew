@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:networkSecurityConfig="@xml/network_security_config" />
+    <application android:networkSecurityConfig="@xml/network_security_config">
+        <!-- adb shell만 보낼 수 있게 DUMP 권한을 요구한다. 일반 앱은 이 권한을 받을 수 없다 -->
+        <receiver
+            android:name=".debug.DebugVoiceReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="ai.pitcrew.app.debug.CHECK_NOW" />
+                <action android:name="ai.pitcrew.app.debug.ANSWER" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>

@@ -92,6 +92,8 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
     val reservations by app.reservations.reservations.collectAsStateWithLifecycle()
     val contacts by app.contacts.contacts.collectAsStateWithLifecycle()
     val voice by app.voiceCommands.state.collectAsStateWithLifecycle()
+    val listening by app.confirmer.listening.collectAsStateWithLifecycle()
+    val proactive by app.preferences.proactive.collectAsStateWithLifecycle()
     val now by produceState(LocalDateTime.now()) {
         while (true) {
             delay(CLOCK_TICK_MILLIS)
@@ -101,7 +103,7 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
 
     // 규제 상태를 모를 때(차량 서비스 재연결 중)는 화면을 바꾸지 않고 승인만 막는다
     if (driving.requiresDistractionOptimization == true) {
-        DrivingScreen(destination, errands, now)
+        DrivingScreen(destination, errands, now, listening)
         return
     }
 
@@ -113,6 +115,11 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
     val approve: (String, ApprovalChannel) -> Unit = { id, channel ->
         app.scope.launch {
             runCatching { app.errands.approve(id, channel) }.onFailure { Log.e("PitCrewApp", "approve failed", it) }
+        }
+    }
+    val undo: (String) -> Unit = { id ->
+        app.scope.launch {
+            runCatching { app.errands.undo(id, ApprovalChannel.TOUCH) }.onFailure { Log.e("PitCrewApp", "undo failed", it) }
         }
     }
 
@@ -132,7 +139,7 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
             NavHost(nav, startDestination = Routes.HOME) {
                 composable(Routes.HOME) {
                     HomeScreen(
-                        HomeState(driving, destination, errands, reservations, contacts, now, voice),
+                        HomeState(driving, destination, errands, reservations, contacts, now, voice, listening),
                         HomeActions(
                             openErrand = { nav.navigate(Routes.errand(it)) },
                             approve = { approve(it, ApprovalChannel.TOUCH) },
@@ -143,6 +150,7 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
                             startVoice = app.voiceCommands::start,
                             cancelVoice = app.voiceCommands::cancel,
                             dismissVoice = app.voiceCommands::dismiss,
+                            undo = undo,
                         ),
                         width,
                     )
@@ -165,6 +173,9 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
                         onBack = { nav.popBackStack() },
                         onApprove = approve,
                         onDecline = app.errands::decline,
+                        now = now,
+                        listening = listening,
+                        onUndo = undo,
                         storeOptions = storeOptions,
                         onSwitchStore = { store ->
                             val item = (errand?.detail as? ErrandDetail.Pickup)?.item ?: return@ErrandDetailScreen
@@ -222,6 +233,8 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
                 }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(
+                        proactive = proactive,
+                        onToggleProactive = { app.preferences.setProactive(!proactive) },
                         onReplayOnboarding = { app.preferences.setOnboarded(false) },
                         onOpenDiagnostics = { nav.navigate(Routes.DIAGNOSTICS) },
                     )

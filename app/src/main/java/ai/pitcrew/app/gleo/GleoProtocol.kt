@@ -10,7 +10,8 @@ import org.json.JSONTokener
 
 enum class GleoFunction {
     NOTIFY_LATE_ARRIVAL,
-    ORDER_PICKUP_ON_ROUTE;
+    ORDER_PICKUP_ON_ROUTE,
+    CANCEL_LAST_ERRAND;
 
     companion object {
         // 문서 예시는 action이 함수명이지만, 에뮬레이터 Gleo(ai.umos.ambientai)는 "<패키지명>.<함수명>"으로 보낸다

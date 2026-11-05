@@ -5,7 +5,7 @@ import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.ui.components.EmptyState
 import ai.pitcrew.app.ui.components.PcCard
 import ai.pitcrew.app.ui.components.ScreenHeader
-import ai.pitcrew.app.ui.errand.kindLabel
+import ai.pitcrew.app.ui.errand.originLabel
 import ai.pitcrew.app.ui.errand.outcomeLine
 import ai.pitcrew.app.ui.errand.summary
 import ai.pitcrew.app.ui.errand.title
@@ -37,14 +37,14 @@ fun HistoryScreen(errands: List<Errand>, now: LocalDateTime, onOpen: (String) ->
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
         ScreenHeader("기록")
         if (finished.isEmpty()) {
-            EmptyState("아직 기록이 없어요", "처리한 지각 대응과 픽업 주문이 여기에 남아요.", icon = Icons.Rounded.History)
+            EmptyState("아직 기록이 없어요", "처리한 지각 대응·픽업 주문·충전 줄서기가 여기에 남아요.", icon = Icons.Rounded.History)
             return@Column
         }
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(PcSpacing.s)) {
             items(finished, key = { it.id }) { errand ->
                 PcCard(Modifier.fillMaxWidth(), onClick = { onOpen(errand.id) }, padding = PcSpacing.l) {
                     Text(
-                        "${errand.kindLabel()} · ${relativeLabel(errand.finishedAt ?: errand.createdAt, now)}",
+                        "${errand.originLabel()} · ${relativeLabel(errand.finishedAt ?: errand.createdAt, now)}",
                         style = PcTheme.type.label,
                         color = PcTheme.colors.textSecondary,
                     )

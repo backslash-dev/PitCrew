@@ -1,9 +1,14 @@
 package ai.pitcrew.app.data.remote
 
+import ai.pitcrew.app.data.ChargerCatalog
 import ai.pitcrew.app.data.ContactRepository
+import ai.pitcrew.app.data.OrderHistory
 import ai.pitcrew.app.data.ReservationRepository
 import ai.pitcrew.app.data.StoreCatalog
+import ai.pitcrew.app.domain.Charger
 import ai.pitcrew.app.domain.Contact
+import ai.pitcrew.app.domain.NearbyRestaurant
+import ai.pitcrew.app.domain.PastOrder
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.domain.Store
 import android.util.Log
@@ -145,6 +150,37 @@ class RemoteStoreCatalog(private val api: PitCrewApi) : StoreCatalog {
                     prepMinutes = it.getInt("prepMinutes"),
                 )
             }
+}
+
+class RemoteChargerCatalog(private val api: PitCrewApi) : ChargerCatalog {
+    override suspend fun onRoute(): List<Charger> =
+        api.get("v1/chargers").getJSONArray("chargers").objects().map {
+            Charger(
+                id = it.getString("id"),
+                name = it.getString("name"),
+                latitude = it.getDouble("latitude"),
+                longitude = it.getDouble("longitude"),
+                detourMinutes = it.getInt("detourMinutes"),
+                powerKw = it.getInt("powerKw"),
+                availableStalls = it.getInt("availableStalls"),
+                restaurants = it.getJSONArray("restaurants").objects().map { r ->
+                    NearbyRestaurant(r.getString("id"), r.getString("name"), r.getInt("walkMinutes"), r.getInt("waitMinutes"))
+                },
+            )
+        }
+}
+
+class RemoteOrderHistory(private val api: PitCrewApi) : OrderHistory {
+    override suspend fun recent(): List<PastOrder> =
+        api.get("v1/orders", mapOf("limit" to "100")).getJSONArray("orders").objects().map {
+            PastOrder(
+                storeId = it.getString("storeId"),
+                storeName = it.getString("storeName"),
+                item = it.getString("item"),
+                pickupAt = it.getString("pickupAt").toLocalDateTime(),
+                cancelled = it.getString("status") == "CANCELLED",
+            )
+        }
 }
 
 internal fun JSONObject.toReservation() = Reservation(

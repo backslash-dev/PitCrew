@@ -2,6 +2,7 @@ package ai.pitcrew.app.errand
 
 import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.mock.MockStepExecutor
+import ai.pitcrew.app.testing.FakeWaypoints
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.ErrandDetail
@@ -15,7 +16,7 @@ import java.time.LocalTime
 
 class PickupArrivalTest {
     private val store = MockStoreCatalog.DEFAULT_STORES.first()
-    private val service = ErrandRunner(MockStepExecutor { true }, now = { LocalDateTime.of(2026, 11, 5, 18, 0) }, stepDelayMillis = 0)
+    private val service = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { LocalDateTime.of(2026, 11, 5, 18, 0) }, stepDelayMillis = 0)
 
     private suspend fun orderedPickup() =
         service.approve(service.propose(ErrandDetail.Pickup("아메리카노", store, LocalTime.of(18, 20))).id, ApprovalChannel.TOUCH)

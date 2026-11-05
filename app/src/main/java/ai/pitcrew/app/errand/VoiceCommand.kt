@@ -7,6 +7,8 @@ sealed interface VoiceCommand {
     data object LateArrivalWithoutTime : VoiceCommand
     data class Pickup(val item: String, val storeName: String?) : VoiceCommand
     data object PickupWithoutItem : VoiceCommand
+    data class ChargeAndDine(val partySize: Int) : VoiceCommand
+    data object Undo : VoiceCommand
     data object Unknown : VoiceCommand
 }
 
@@ -16,7 +18,7 @@ fun interface CommandInterpreter {
 }
 
 /**
- * 서버 전 임시 해석기. 지각("N시 … 늦")과 픽업("메뉴 … 주문/픽업")만 규칙으로 알아듣는다.
+ * 서버 전 임시 해석기. 되돌리기("취소/되돌려"), 충전("충전 … N명"), 지각("N시 … 늦"), 픽업("메뉴 … 주문/픽업")을 규칙으로 알아듣는다.
  * 시각은 숫자와 한글 수사(한~열두)를 모두 받고, 오후·저녁·밤이면 12시간을 더한다.
  */
 class RuleBasedInterpreter(private val storeNames: suspend () -> List<String>) : CommandInterpreter {
@@ -32,6 +34,10 @@ class RuleBasedInterpreter(private val storeNames: suspend () -> List<String>) :
         private val TIME = Regex("(오전|아침|오후|저녁|밤)?\\s*${HOUR}\\s*시\\s*(반|(\\d{1,2})\\s*분)?")
         private val LATE = Regex("늦|지각")
         private val ORDER = Regex("픽업|주문|포장|사\\s*(다|가|줘)")
+        private val UNDO = Regex("취소|되돌려|되돌리|없던\\s*일|물러")
+        private val CHARGE = Regex("충전")
+        private val PARTY = Regex("(\\d{1,2}|${NATIVE_HOURS.joinToString("|") { it.first }})\\s*명")
+        private val PARTY_WORDS = listOf("혼자" to 1, "둘이" to 2, "셋이" to 3, "넷이" to 4)
         private val MENU = listOf(
             "바닐라라테", "카페라테", "카푸치노", "콜드브루", "아메리카노", "라테", "라떼", "녹차",
             "샌드위치", "베이글", "식빵", "크루아상", "케이크", "도시락", "김밥", "주먹밥",
@@ -39,6 +45,8 @@ class RuleBasedInterpreter(private val storeNames: suspend () -> List<String>) :
 
         fun parse(text: String, storeNames: List<String>): VoiceCommand {
             val normalized = text.trim()
+            if (UNDO.containsMatchIn(normalized)) return VoiceCommand.Undo
+            if (CHARGE.containsMatchIn(normalized)) return VoiceCommand.ChargeAndDine(parsePartySize(normalized) ?: 1)
             if (LATE.containsMatchIn(normalized)) {
                 return parseTime(normalized)?.let { VoiceCommand.LateArrival(it) } ?: VoiceCommand.LateArrivalWithoutTime
             }
@@ -49,6 +57,12 @@ class RuleBasedInterpreter(private val storeNames: suspend () -> List<String>) :
                 return VoiceCommand.Pickup(item, store)
             }
             return VoiceCommand.Unknown
+        }
+
+        internal fun parsePartySize(text: String): Int? {
+            PARTY_WORDS.firstOrNull { text.contains(it.first) }?.let { return it.second }
+            val count = PARTY.find(text)?.groupValues?.get(1) ?: return null
+            return (count.toIntOrNull() ?: NATIVE_HOURS.first { it.first == count }.second).takeIf { it in 1..20 }
         }
 
         internal fun parseTime(text: String): LocalTime? {

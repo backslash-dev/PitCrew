@@ -21,6 +21,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         app.platform.startAll()
         app.announcer.start()
+        app.assistant.start()
         setContent {
             PitCrewTheme {
                 PitCrewApp(

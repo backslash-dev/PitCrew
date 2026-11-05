@@ -6,7 +6,10 @@ import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.Store
 import ai.pitcrew.app.platform.InteractionMode
+import ai.pitcrew.app.ui.components.ButtonKind
+import ai.pitcrew.app.ui.components.ButtonSize
 import ai.pitcrew.app.ui.components.EmptyState
+import ai.pitcrew.app.ui.components.PcButton
 import ai.pitcrew.app.ui.components.Hairline
 import ai.pitcrew.app.ui.components.KeyFigure
 import ai.pitcrew.app.ui.components.ListRow
@@ -33,6 +36,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.rounded.EvStation
+import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material.icons.rounded.Storefront
@@ -41,6 +47,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import java.time.LocalDateTime
 import java.time.LocalTime
 
 @Composable
@@ -51,11 +58,14 @@ fun ErrandDetailScreen(
     onBack: () -> Unit,
     onApprove: (String, ApprovalChannel) -> Unit,
     onDecline: (String) -> Unit,
+    now: LocalDateTime,
+    listening: Boolean,
+    onUndo: (String) -> Unit,
     storeOptions: List<StoreOption> = emptyList(),
     onSwitchStore: (Store) -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
-        ScreenHeader(errand?.kindLabel() ?: "작업", onBack = onBack)
+        ScreenHeader(errand?.originLabel() ?: "작업", onBack = onBack)
         if (errand == null) {
             EmptyState("작업을 찾을 수 없어요", "이미 정리되었을 수 있어요.", icon = Icons.Rounded.SearchOff)
             return@Column
@@ -80,6 +90,11 @@ fun ErrandDetailScreen(
                             color = if (errand.state == ErrandState.FAILED) PcTheme.colors.negative else PcTheme.colors.textPrimary,
                         )
                     }
+                    // 되돌리기에 실패하면 작업은 완료 상태로 남으므로 실패 사유를 따로 보인다
+                    if (errand.state == ErrandState.COMPLETED && errand.undoNote != null) {
+                        Spacer(Modifier.height(PcSpacing.s))
+                        Text("되돌리지 못했어요 · ${errand.undoNote}", style = PcTheme.type.body, color = PcTheme.colors.negative)
+                    }
                 }
             }
             if (width == WindowWidth.COMPACT) {
@@ -87,12 +102,14 @@ fun ErrandDetailScreen(
                 Spacer(Modifier.height(PcSpacing.l))
                 timeline()
                 Companions(errand)
+                DiningPlan(errand)
                 OtherStores(errand, mode, storeOptions, onSwitchStore)
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
                     Column(Modifier.weight(1f)) {
                         figures()
                         Companions(errand)
+                        DiningPlan(errand)
                         OtherStores(errand, mode, storeOptions, onSwitchStore)
                     }
                     Column(Modifier.weight(1f)) { timeline() }
@@ -106,7 +123,27 @@ fun ErrandDetailScreen(
                 onApprove = { onApprove(errand.id, ApprovalChannel.TOUCH) },
                 onDecline = { onDecline(errand.id) },
                 modifier = Modifier.padding(vertical = PcSpacing.l),
+                voiceHint = errand.voiceApprovalHint(listening),
             )
+        } else if (errand.canUndo(now) || errand.undoing) {
+            Hairline()
+            UndoBar(errand, mode, onUndo = { onUndo(errand.id) }, modifier = Modifier.padding(vertical = PcSpacing.l))
+        }
+    }
+}
+
+@Composable
+private fun UndoBar(errand: Errand, mode: InteractionMode, onUndo: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().height(80.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
+        Text(
+            if (mode == InteractionMode.TOUCH) "잘못 시켰다면 끝낸 지 ${Errand.UNDO_WINDOW.toMinutes()}분 안에 되돌릴 수 있어요"
+            else "되돌리려면 Gleo에게 \"피트크루 앱으로 방금 거 취소해\"라고 말하세요",
+            style = PcTheme.type.body,
+            color = PcTheme.colors.textSecondary,
+            modifier = Modifier.weight(1f),
+        )
+        if (mode == InteractionMode.TOUCH) {
+            PcButton(if (errand.undoing) "되돌리는 중" else "되돌리기", onUndo, kind = ButtonKind.BASIC, size = ButtonSize.LARGE, icon = Icons.AutoMirrored.Rounded.Undo, enabled = !errand.undoing)
         }
     }
 }
@@ -130,6 +167,12 @@ private fun Figures(errand: Errand) {
                     KeyFigure("픽업", d.readyAt.hhmm(), Modifier.widthIn(min = 160.dp))
                     KeyFigure("우회", "+${d.store.detourMinutes}분", Modifier.widthIn(min = 160.dp))
                     KeyFigure("조리", "${d.store.prepMinutes}분", Modifier.widthIn(min = 160.dp))
+                }
+                is ErrandDetail.ChargeAndDine -> {
+                    KeyFigure("배터리", d.batteryPercent?.let { "$it%" } ?: "알 수 없음", Modifier.widthIn(min = 160.dp), tone = Tone.ATTENTION)
+                    KeyFigure("충전소 도착", d.arriveAt.hhmm(), Modifier.widthIn(min = 160.dp))
+                    KeyFigure("충전", "약 ${d.chargeMinutes}분", Modifier.widthIn(min = 160.dp))
+                    KeyFigure("식당 대기", "${d.restaurant.waitMinutes}분", Modifier.widthIn(min = 160.dp))
                 }
             }
         }
@@ -156,6 +199,17 @@ private fun OtherStores(errand: Errand, mode: InteractionMode, options: List<Sto
                 onClick = { onSwitch(option.store) },
             )
         }
+    }
+}
+
+@Composable
+private fun DiningPlan(errand: Errand) {
+    val d = errand.detail as? ErrandDetail.ChargeAndDine ?: return
+    Spacer(Modifier.height(PcSpacing.l))
+    SectionHeader("충전하는 동안")
+    Column(verticalArrangement = Arrangement.spacedBy(PcSpacing.xs)) {
+        ListRow(d.charger.name, supporting = "${d.charger.powerKw}kW · 빈자리 ${d.charger.availableStalls}면 · 우회 ${d.charger.detourMinutes}분", leading = Icons.Rounded.EvStation)
+        ListRow(d.restaurant.name, supporting = "걸어서 ${d.restaurant.walkMinutes}분 · 대기 ${d.restaurant.waitMinutes}분 · ${d.partySize}명", leading = Icons.Rounded.Restaurant)
     }
 }
 

@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
 
 data class WaypointStatus(
     val name: String,
@@ -29,7 +31,15 @@ data class WaypointStatus(
     val longitude: Double,
     val remainTimeSeconds: Int,
     val remainDistanceMeters: Int,
-)
+) {
+    /** 내비가 이름을 POI 이름으로 바꿔 돌려줄 수 있어 좌표가 가까워도 같은 곳으로 본다. */
+    fun isAt(name: String, latitude: Double, longitude: Double): Boolean =
+        this.name == name || (abs(this.latitude - latitude) < SAME_PLACE_DEGREES && abs(this.longitude - longitude) < SAME_PLACE_DEGREES)
+
+    private companion object {
+        const val SAME_PLACE_DEGREES = 0.002
+    }
+}
 
 data class Destination(
     val name: String,
@@ -52,6 +62,8 @@ class NavigationClient(context: Context) : AutoCloseable {
     private val _waypoints = MutableStateFlow<List<WaypointStatus>>(emptyList())
     val waypoints: StateFlow<List<WaypointStatus>> = _waypoints.asStateFlow()
 
+    private val waypointReplies = MutableSharedFlow<List<WaypointStatus>>(extraBufferCapacity = 1)
+
     private val listener = object : NaviHelperEventListener {
         override fun onRouteStarted(info: RouteStartInfo) = refreshDestination()
         override fun onRoutingCompleted() = refreshDestination()
@@ -70,7 +82,9 @@ class NavigationClient(context: Context) : AutoCloseable {
             destinationReplies.tryEmit(destination)
         }
         override fun onWayPointInfo(list: List<WaypointInfo>) {
-            _waypoints.value = list.map { WaypointStatus(it.name, it.latitude, it.longitude, it.remainTime, it.remainDistance) }
+            val waypoints = list.map { WaypointStatus(it.name, it.latitude, it.longitude, it.remainTime, it.remainDistance) }
+            _waypoints.value = waypoints
+            waypointReplies.tryEmit(waypoints)
         }
         override fun onRouteStateInfo(info: RouteStateInfo) {}
         override fun onTripInfo(info: TripInfo) {}
@@ -142,6 +156,28 @@ class NavigationClient(context: Context) : AutoCloseable {
         }.onFailure { Log.w(TAG, "add waypoint failed", it) }.isSuccess
     }
 
+    /**
+     * 추가했던 경유지를 뺀다. SDK는 순번(첫째·둘째)으로만 지우므로 현재 경유지 목록에서 위치를 찾는다.
+     * 목록에 없으면 이미 빠진 것으로 본다. 목록을 받지 못했거나 셋째 이후면 false.
+     */
+    suspend fun removeWaypoint(name: String, latitude: Double, longitude: Double): Boolean {
+        if (_status.value != SdkStatus.Ready) return false
+        val current = withTimeoutOrNull(WAYPOINT_REPLY_MILLIS) {
+            coroutineScope {
+                val reply = async(start = CoroutineStart.UNDISPATCHED) { waypointReplies.first() }
+                navi.getWaypointInfo()
+                reply.await()
+            }
+        } ?: return false
+        val target = when (current.indexOfFirst { it.isAt(name, latitude, longitude) }) {
+            -1 -> return true
+            0 -> WaypointIndex.FIRST
+            1 -> WaypointIndex.SECOND
+            else -> return false
+        }
+        return runCatching { navi.removeWaypoint(target) }.onFailure { Log.w(TAG, "remove waypoint failed", it) }.isSuccess
+    }
+
     override fun close() {
         runCatching { navi.removeListener(listener) }
         runCatching { navi.release() }
@@ -149,6 +185,7 @@ class NavigationClient(context: Context) : AutoCloseable {
 
     private companion object {
         const val TAG = "NavigationClient"
+        const val WAYPOINT_REPLY_MILLIS = 2_000L
     }
 }
 

@@ -4,10 +4,14 @@ import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
 import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.mock.MockStepExecutor
+import ai.pitcrew.app.testing.FakeWaypoints
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.Reservation
+import ai.pitcrew.app.data.mock.MockChargerCatalog
+import ai.pitcrew.app.errand.ChargeAndDineUseCase
 import ai.pitcrew.app.errand.LateArrivalUseCase
+import ai.pitcrew.app.errand.UndoUseCase
 import ai.pitcrew.app.errand.PickupUseCase
 import ai.pitcrew.app.errand.RuleBasedInterpreter
 import ai.pitcrew.app.platform.Destination
@@ -36,7 +40,7 @@ class VoiceCommandControllerTest {
 
     private val now = LocalDateTime.of(2026, 11, 5, 18, 40)
     private val route = Destination("강남역", 45 * 60, 13_000)
-    private val errands = ErrandRunner(MockStepExecutor { true }, now = { now }, stepDelayMillis = 0)
+    private val errands = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }, stepDelayMillis = 0)
     private val speech = FakeSpeech()
 
     private fun controller(scope: CoroutineScope) = VoiceCommandController(
@@ -49,6 +53,8 @@ class VoiceCommandControllerTest {
             InMemoryContactRepository(),
         ) { now },
         pickup = PickupUseCase({ route }, MockStoreCatalog(), errands) { now },
+        charging = ChargeAndDineUseCase({ route }, MockChargerCatalog(), { 18 }, errands) { now },
+        undo = UndoUseCase(errands) { now },
         scope = scope,
         listenTimeoutMillis = 5_000,
     )

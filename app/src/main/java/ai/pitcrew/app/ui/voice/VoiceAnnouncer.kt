@@ -2,10 +2,12 @@ package ai.pitcrew.app.ui.voice
 
 import ai.pitcrew.app.data.ErrandService
 import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.Errand
+import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.errand.PickupArrival
 import ai.pitcrew.app.platform.NavigationClient
-import ai.pitcrew.app.platform.VoiceOutput
+import ai.pitcrew.app.platform.Speaker
 import ai.pitcrew.app.ui.errand.outcomeLine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -15,13 +17,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * 음성 안내 담당. 화면 탭으로 승인한 작업의 결과와 픽업 매장 도착 직전 안내를 TTS로 말한다.
- * 음성 승인은 Gleo가 결과를 직접 말하므로 여기서 다시 말하지 않는다.
+ * 음성 안내 담당. 화면 탭으로 승인·되돌린 작업과 PitCrew가 먼저 제안한 작업의 결과, 픽업 매장 도착 직전 안내를 TTS로 말한다.
+ * Gleo로 시킨 일은 Gleo가 결과를 직접 말하므로 여기서 다시 말하지 않는다.
  */
 class VoiceAnnouncer(
     private val errands: ErrandService,
     private val navigation: NavigationClient,
-    private val voice: VoiceOutput,
+    private val voice: Speaker,
     private val scope: CoroutineScope,
 ) {
     private var job: Job? = null
@@ -34,7 +36,7 @@ class VoiceAnnouncer(
             launch { pollWaypointsWhileWaiting() }
             combine(errands.errands, navigation.waypoints) { list, waypoints -> list to waypoints }
                 .collect { (list, waypoints) ->
-                    list.filter { it.approvedVia == ApprovalChannel.TOUCH && it.state in FINISHED && spokenOutcomes.add(it.id) }
+                    list.filter { it.shouldAnnounceOutcome() && spokenOutcomes.add("${it.id}/${it.state}") }
                         .forEach { errand -> errand.outcomeLine()?.let(voice::speak) }
                     PickupArrival.due(list, waypoints).forEach { errand ->
                         errands.markArrivalAnnounced(errand.id)
@@ -52,8 +54,13 @@ class VoiceAnnouncer(
         }
     }
 
+    private fun Errand.shouldAnnounceOutcome(): Boolean = when (state) {
+        ErrandState.COMPLETED, ErrandState.FAILED -> approvedVia == ApprovalChannel.TOUCH || (approvedVia != null && origin == ErrandOrigin.SUGGESTED)
+        ErrandState.CANCELLED -> undoneVia == ApprovalChannel.TOUCH
+        else -> false
+    }
+
     private companion object {
         const val POLL_MILLIS = 20_000L
-        val FINISHED = setOf(ErrandState.COMPLETED, ErrandState.FAILED)
     }
 }

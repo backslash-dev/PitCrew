@@ -16,7 +16,17 @@ class AppPreferences(context: Context) {
         _onboarded.value = value
     }
 
+    private val _proactive = MutableStateFlow(prefs.getBoolean(KEY_PROACTIVE, true))
+    /** 늦음·배터리 부족·단골 메뉴를 PitCrew가 먼저 묻는지. */
+    val proactive: StateFlow<Boolean> = _proactive.asStateFlow()
+
+    fun setProactive(value: Boolean) {
+        prefs.edit().putBoolean(KEY_PROACTIVE, value).apply()
+        _proactive.value = value
+    }
+
     private companion object {
         const val KEY_ONBOARDED = "onboarded"
+        const val KEY_PROACTIVE = "proactive"
     }
 }

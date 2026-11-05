@@ -1,6 +1,6 @@
 {
   "packageName": "ai.pitcrew.app",
-  "appDescription": "An in-car errand agent that handles running late for reservations and ordering pickups along the route, based on the navigation arrival time.",
+  "appDescription": "An in-car errand agent that handles running late for reservations and ordering pickups along the route based on the navigation arrival time, and can undo an errand it just completed.",
   "invokeWord": "피트크루",
   "version": "0.1.0",
   "actionCalls": [
@@ -48,6 +48,24 @@
             }
           },
           "required": ["item"]
+        },
+        "component": "service"
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "CANCEL_LAST_ERRAND",
+        "description": "Undo the errand PitCrew completed in the last few minutes, such as restoring a changed reservation, cancelling a pickup order, or cancelling a restaurant waitlist, when the user says it was a mistake or wants to cancel it.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "confirmed": {
+              "type": "boolean",
+              "description": "Whether the user explicitly approved undoing the errand after being told what will be undone."
+            }
+          },
+          "required": []
         },
         "component": "service"
       }

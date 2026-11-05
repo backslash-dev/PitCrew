@@ -1,32 +1,43 @@
 package ai.pitcrew.app
 
 import ai.pitcrew.app.data.AppPreferences
+import ai.pitcrew.app.data.ChargerCatalog
 import ai.pitcrew.app.data.ContactRepository
+import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.ErrandService
+import ai.pitcrew.app.data.OrderHistory
 import ai.pitcrew.app.data.ReservationRepository
 import ai.pitcrew.app.data.StoreCatalog
+import ai.pitcrew.app.data.WaypointEditor
 import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
-import ai.pitcrew.app.data.ErrandRunner
+import ai.pitcrew.app.data.mock.MockChargerCatalog
+import ai.pitcrew.app.data.mock.MockOrderHistory
 import ai.pitcrew.app.data.mock.MockStepExecutor
+import ai.pitcrew.app.data.mock.MockStoreCatalog
+import ai.pitcrew.app.data.mock.SampleData
 import ai.pitcrew.app.data.remote.PitCrewApi
+import ai.pitcrew.app.data.remote.RemoteChargerCatalog
 import ai.pitcrew.app.data.remote.RemoteContactRepository
+import ai.pitcrew.app.data.remote.RemoteOrderHistory
 import ai.pitcrew.app.data.remote.RemoteReservationRepository
 import ai.pitcrew.app.data.remote.RemoteStepExecutor
 import ai.pitcrew.app.data.remote.RemoteStoreCatalog
-import ai.pitcrew.app.domain.Store
-import ai.pitcrew.app.data.mock.MockStoreCatalog
-import ai.pitcrew.app.data.mock.SampleData
+import ai.pitcrew.app.errand.CancelLastErrandHandler
+import ai.pitcrew.app.errand.ChargeAndDineUseCase
 import ai.pitcrew.app.errand.LateArrivalHandler
 import ai.pitcrew.app.errand.LateArrivalUseCase
 import ai.pitcrew.app.errand.PickupOnRouteHandler
 import ai.pitcrew.app.errand.PickupUseCase
 import ai.pitcrew.app.errand.RuleBasedInterpreter
+import ai.pitcrew.app.errand.UndoUseCase
 import ai.pitcrew.app.gleo.GleoActionDispatcher
 import ai.pitcrew.app.gleo.GleoFunction
 import ai.pitcrew.app.platform.PlatformServices
+import ai.pitcrew.app.ui.voice.ProactiveAssistant
 import ai.pitcrew.app.ui.voice.VoiceAnnouncer
 import ai.pitcrew.app.ui.voice.VoiceCommandController
+import ai.pitcrew.app.ui.voice.VoiceConfirmer
 import android.app.Application
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -52,13 +63,20 @@ class PitCrewApplication : Application() {
             ?: InMemoryReservationRepository(SampleData.reservations(LocalDateTime.now()))
     }
     val stores: StoreCatalog by lazy { api?.let(::RemoteStoreCatalog) ?: MockStoreCatalog() }
+    private val chargers: ChargerCatalog by lazy { api?.let(::RemoteChargerCatalog) ?: MockChargerCatalog() }
+    private val orderHistory: OrderHistory by lazy { api?.let(::RemoteOrderHistory) ?: MockOrderHistory.routine(LocalDateTime.now()) }
+
+    private val waypoints = object : WaypointEditor {
+        override suspend fun add(name: String, latitude: Double, longitude: Double) = platform.navigation.addWaypoint(name, latitude, longitude)
+        override suspend fun remove(name: String, latitude: Double, longitude: Double) = platform.navigation.removeWaypoint(name, latitude, longitude)
+    }
+
     val errands: ErrandService by lazy {
-        val addWaypoint: suspend (Store) -> Boolean = { store -> platform.navigation.addWaypoint(store.displayName, store.latitude, store.longitude) }
         val remote = api
         val executor = if (remote != null) {
-            RemoteStepExecutor(remote, reloadReservations = { reservations.refresh() }, addWaypoint = addWaypoint)
+            RemoteStepExecutor(remote, reloadReservations = { reservations.refresh() }, waypoints = waypoints)
         } else {
-            MockStepExecutor(addWaypoint)
+            MockStepExecutor(waypoints)
         }
         // 목업은 처리 시간이 없으므로 진행이 보이도록 단계 사이를 띄운다
         ErrandRunner(executor, stepDelayMillis = if (remote != null) 0 else 600)
@@ -68,6 +86,10 @@ class PitCrewApplication : Application() {
         LateArrivalUseCase(platform.navigation::fetchDestination, errands, reservations, contacts)
     }
     val pickup: PickupUseCase by lazy { PickupUseCase(platform.navigation::fetchDestination, stores, errands) }
+    val charging: ChargeAndDineUseCase by lazy {
+        ChargeAndDineUseCase(platform.navigation::fetchDestination, chargers, { platform.battery.stateOfChargePercent.value }, errands)
+    }
+    val undo: UndoUseCase by lazy { UndoUseCase(errands) }
 
     val voiceCommands: VoiceCommandController by lazy {
         VoiceCommandController(
@@ -75,17 +97,39 @@ class PitCrewApplication : Application() {
             interpreter = RuleBasedInterpreter { stores.candidatesOnRoute().map { it.displayName } },
             lateArrival = lateArrival,
             pickup = pickup,
+            charging = charging,
+            undo = undo,
             scope = scope,
         )
     }
 
     val announcer: VoiceAnnouncer by lazy { VoiceAnnouncer(errands, platform.navigation, platform.voiceOutput, scope) }
 
+    val confirmer: VoiceConfirmer by lazy { VoiceConfirmer(platform.voiceOutput, platform.voiceInput) }
+
+    val assistant: ProactiveAssistant by lazy {
+        ProactiveAssistant(
+            scope = scope,
+            enabled = preferences.proactive,
+            fetchDestination = platform.navigation::fetchDestination,
+            batteryPercent = { platform.battery.stateOfChargePercent.value },
+            reservations = reservations,
+            orders = orderHistory,
+            stores = stores,
+            errands = errands,
+            lateArrival = lateArrival,
+            pickup = pickup,
+            charging = charging,
+            confirmer = confirmer,
+        )
+    }
+
     val gleo: GleoActionDispatcher by lazy {
         GleoActionDispatcher(
             mapOf(
                 GleoFunction.NOTIFY_LATE_ARRIVAL to LateArrivalHandler(lateArrival),
                 GleoFunction.ORDER_PICKUP_ON_ROUTE to PickupOnRouteHandler(pickup),
+                GleoFunction.CANCEL_LAST_ERRAND to CancelLastErrandHandler(undo),
             ),
         )
     }

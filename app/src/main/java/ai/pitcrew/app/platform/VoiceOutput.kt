@@ -11,14 +11,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class VoiceOutput(context: Context) : AutoCloseable {
+interface Speaker {
+    val speaking: StateFlow<Boolean>
+    fun speak(text: String): Boolean
+}
+
+class VoiceOutput(context: Context) : Speaker, AutoCloseable {
     private val tts = TextToSpeech(context, Mode.ON_DEVICE)
 
     private val _status = MutableStateFlow<SdkStatus>(SdkStatus.Connecting)
     val status: StateFlow<SdkStatus> = _status.asStateFlow()
 
     private val _speaking = MutableStateFlow(false)
-    val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
+    override val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     private val listener = object : EventListener {
         override fun onReady() {}
@@ -49,7 +54,7 @@ class VoiceOutput(context: Context) : AutoCloseable {
         }
     }
 
-    fun speak(text: String): Boolean {
+    override fun speak(text: String): Boolean {
         if (_status.value != SdkStatus.Ready || text.isBlank()) return false
         // isFinal=false는 뒤에 조각이 이어진다는 뜻이라 onDone이 오지 않는다
         tts.speak(text, true)

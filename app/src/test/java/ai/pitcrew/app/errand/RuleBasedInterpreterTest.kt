@@ -41,4 +41,17 @@ class RuleBasedInterpreterTest {
     fun `해당 없는 말은 알아듣지 못한다`() {
         assertEquals(VoiceCommand.Unknown, parse("오늘 날씨 어때"))
     }
+
+    @Test
+    fun `취소하거나 되돌리라는 말이면 되돌리기다`() {
+        assertEquals(VoiceCommand.Undo, parse("방금 거 취소해"))
+        assertEquals(VoiceCommand.Undo, parse("아까 주문 되돌려줘"))
+    }
+
+    @Test
+    fun `충전 말이면 인원과 함께 충전 줄서기다`() {
+        assertEquals(VoiceCommand.ChargeAndDine(1), parse("충전하면서 밥 먹을래"))
+        assertEquals(VoiceCommand.ChargeAndDine(2), parse("둘이 충전하는 동안 밥 먹자"))
+        assertEquals(VoiceCommand.ChargeAndDine(3), parse("세 명 충전하면서 식사할래"))
+    }
 }

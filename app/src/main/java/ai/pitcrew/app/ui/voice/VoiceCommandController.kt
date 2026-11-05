@@ -1,11 +1,18 @@
 package ai.pitcrew.app.ui.voice
 
+import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.errand.ChargeAndDineUseCase
+import ai.pitcrew.app.errand.ChargeOutcome
 import ai.pitcrew.app.errand.CommandInterpreter
 import ai.pitcrew.app.errand.LateArrivalOutcome
 import ai.pitcrew.app.errand.LateArrivalUseCase
 import ai.pitcrew.app.errand.PickupOutcome
 import ai.pitcrew.app.errand.PickupUseCase
+import ai.pitcrew.app.errand.UndoOutcome
+import ai.pitcrew.app.errand.UndoUseCase
 import ai.pitcrew.app.errand.VoiceCommand
 import ai.pitcrew.app.platform.SpeechSource
 import kotlinx.coroutines.CoroutineScope
@@ -25,12 +32,14 @@ sealed interface VoiceCommandState {
     data class Done(val heard: String?, val message: String, val needsApproval: Boolean) : VoiceCommandState
 }
 
-/** 주차 중 앱 화면에서 말로 시키기. 들은 문장을 해석해 지각 대응·픽업 유스케이스를 실행한다. */
+/** 주차 중 앱 화면에서 말로 시키기. 들은 문장을 해석해 지각 대응·픽업·충전·되돌리기 유스케이스를 실행한다. */
 class VoiceCommandController(
     private val speech: SpeechSource,
     private val interpreter: CommandInterpreter,
     private val lateArrival: LateArrivalUseCase,
     private val pickup: PickupUseCase,
+    private val charging: ChargeAndDineUseCase,
+    private val undo: UndoUseCase,
     private val scope: CoroutineScope,
     private val listenTimeoutMillis: Long = LISTEN_TIMEOUT_MILLIS,
 ) {
@@ -96,7 +105,24 @@ class VoiceCommandController(
                 is PickupOutcome.Finished -> done("처리했어요.")
             }
             VoiceCommand.PickupWithoutItem -> done("무엇을 픽업할지 함께 말해 주세요.")
-            VoiceCommand.Unknown -> done("어떤 일을 할지 알아듣지 못했어요. 지각 대응이나 픽업 주문을 말해 주세요.")
+            is VoiceCommand.ChargeAndDine -> when (val outcome = charging.run(command.partySize)) {
+                ChargeOutcome.NoRoute -> done("내비게이션에서 목적지를 먼저 정해 주세요.")
+                ChargeOutcome.NavigationUnavailable -> done("내비게이션에 연결하지 못했어요.")
+                ChargeOutcome.NoCharger -> done("경로에서 자리가 있는 충전소를 찾지 못했어요.")
+                is ChargeOutcome.NotNeeded -> done("배터리가 ${outcome.batteryPercent}% 남아 있어 충전하지 않아도 돼요.")
+                is ChargeOutcome.AwaitingApproval -> {
+                    val d = outcome.errand.detail as ErrandDetail.ChargeAndDine
+                    done("${d.charger.name}에서 충전하는 동안 ${d.restaurant.name}에 줄을 설 수 있어요. 아래 카드에서 확인하고 승인해 주세요.", needsApproval = true)
+                }
+            }
+            VoiceCommand.Undo -> when (val outcome = undo.run(confirmed = true, channel = ApprovalChannel.VOICE)) {
+                UndoOutcome.NothingToUndo -> done("되돌릴 수 있는 최근 작업이 없어요. 끝낸 지 ${Errand.UNDO_WINDOW.toMinutes()}분 안의 작업만 되돌릴 수 있어요.")
+                is UndoOutcome.AwaitingConfirmation -> done("되돌릴 작업을 확인해 주세요.")
+                is UndoOutcome.Finished ->
+                    if (outcome.errand.state == ErrandState.CANCELLED) done(outcome.errand.undoNote?.let { "되돌렸어요. $it" } ?: "되돌렸어요.")
+                    else done("되돌리지 못했어요. ${outcome.errand.undoNote.orEmpty()}".trim())
+            }
+            VoiceCommand.Unknown -> done("어떤 일을 할지 알아듣지 못했어요. 지각 대응, 픽업 주문, 충전, 되돌리기를 말해 주세요.")
         }
     }
 

@@ -2,6 +2,7 @@ package ai.pitcrew.app.ui.errand
 
 import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.mock.MockStepExecutor
+import ai.pitcrew.app.testing.FakeWaypoints
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.Contact
@@ -30,14 +31,14 @@ class ErrandTextTest {
 
     @Test
     fun `승인 전에는 진행·결과 문장이 없다`() {
-        val errand = ErrandRunner(MockStepExecutor { true }, now = { now }).propose(late)
+        val errand = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }).propose(late)
         assertNull(errand.progressLine())
         assertNull(errand.outcomeLine())
     }
 
     @Test
     fun `진행 중이면 단계 이름 앞부분과 순서를 보여준다`() {
-        val errand = ErrandRunner(MockStepExecutor { true }, now = { now }).propose(late)
+        val errand = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }).propose(late)
         val inProgress = errand.copy(
             state = ErrandState.IN_PROGRESS,
             steps = errand.steps.mapIndexed { i, s ->
@@ -53,21 +54,21 @@ class ErrandTextTest {
 
     @Test
     fun `완료하면 결과를 문장으로 말한다`() = runTest {
-        val service = ErrandRunner(MockStepExecutor { true }, now = { now }, stepDelayMillis = 0)
+        val service = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }, stepDelayMillis = 0)
         val done = service.approve(service.propose(late).id, ApprovalChannel.TOUCH)
         assertEquals("예약을 00:00에 다시 잡았어요 · 일행 2명에게 알렸어요", done.outcomeLine())
     }
 
     @Test
     fun `실패하면 실패한 단계를 말한다`() = runTest {
-        val service = ErrandRunner(MockStepExecutor { false }, now = { now }, stepDelayMillis = 0)
+        val service = ErrandRunner(MockStepExecutor(FakeWaypoints { false }), now = { now }, stepDelayMillis = 0)
         val failed = service.approve(service.propose(pickup).id, ApprovalChannel.VOICE)
         assertEquals("경유지 추가에 실패했어요 · 내비게이션에 경유지를 넣지 못했어요", failed.outcomeLine())
     }
 
     @Test
     fun `거절하면 진행하지 않았다고 말한다`() {
-        val service = ErrandRunner(MockStepExecutor { true }, now = { now })
+        val service = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now })
         val id = service.propose(pickup).id
         service.decline(id)
         assertEquals("거절해서 진행하지 않았어요", service.errands.value.single().outcomeLine())

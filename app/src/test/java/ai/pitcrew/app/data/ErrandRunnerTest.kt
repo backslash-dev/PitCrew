@@ -1,6 +1,7 @@
 package ai.pitcrew.app.data
 
 import ai.pitcrew.app.data.mock.MockStepExecutor
+import ai.pitcrew.app.testing.FakeWaypoints
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.ErrandDetail
@@ -17,7 +18,7 @@ import java.time.LocalTime
 class ErrandRunnerTest {
     private val now = LocalDateTime.of(2026, 11, 5, 18, 0)
     private val pickup = ErrandDetail.Pickup("아메리카노", MockStoreCatalog.DEFAULT_STORES.first(), LocalTime.of(18, 20))
-    private val service = ErrandRunner(MockStepExecutor { true }, now = { now }, stepDelayMillis = 0)
+    private val service = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }, stepDelayMillis = 0)
 
     @Test
     fun `제안하면 승인 대기 단계부터 시작한다`() {

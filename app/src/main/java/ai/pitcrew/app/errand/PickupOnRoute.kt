@@ -5,6 +5,7 @@ import ai.pitcrew.app.data.StoreCatalog
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.Store
 import ai.pitcrew.app.gleo.GleoActionHandler
@@ -55,14 +56,24 @@ class PickupUseCase(
 
     suspend fun candidates(): List<Store> = stores.candidatesOnRoute()
 
-    private suspend fun order(item: String, store: Store, confirmed: Boolean, channel: ApprovalChannel): PickupOutcome {
+    /** 자주 시키는 메뉴를 PitCrew가 먼저 제안한다. */
+    suspend fun suggest(item: String, store: Store): PickupOutcome =
+        order(item, store, confirmed = false, channel = ApprovalChannel.VOICE, origin = ErrandOrigin.SUGGESTED)
+
+    private suspend fun order(
+        item: String,
+        store: Store,
+        confirmed: Boolean,
+        channel: ApprovalChannel,
+        origin: ErrandOrigin = ErrandOrigin.REQUESTED,
+    ): PickupOutcome {
         val destination = try {
             fetchDestination()
         } catch (e: SdkUnavailableException) {
             return PickupOutcome.NavigationUnavailable
         } ?: return PickupOutcome.NoRoute
         val readyAt = PickupPlanner.readyAt(store, now(), destination.remainTimeSeconds)
-        val errand = errands.propose(ErrandDetail.Pickup(item, store, readyAt))
+        val errand = errands.propose(ErrandDetail.Pickup(item, store, readyAt), origin)
         if (!confirmed) return PickupOutcome.AwaitingApproval(errand)
         return PickupOutcome.Finished(errands.approve(errand.id, channel))
     }

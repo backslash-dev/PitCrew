@@ -2,6 +2,7 @@ package ai.pitcrew.app.ui.errand
 
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.StepState
 import ai.pitcrew.app.platform.InteractionMode
@@ -44,23 +45,28 @@ import androidx.compose.ui.unit.dp
 fun Errand.kindLabel(): String = when (detail) {
     is ErrandDetail.LateArrival -> "지각 대응"
     is ErrandDetail.Pickup -> "경로 픽업"
+    is ErrandDetail.ChargeAndDine -> "충전 · 줄서기"
 }
 
 fun Errand.title(): String = when (val d = detail) {
-    is ErrandDetail.LateArrival -> "${d.placeName ?: "${d.appointment.hhmm()} 약속"} · ${d.delayMinutes}분 늦음"
+    is ErrandDetail.LateArrival -> "${d.placeName ?: "${d.appointment.hhmm()} 약속"} · ${if (d.followUp) "또 " else ""}${d.delayMinutes}분 늦음"
     is ErrandDetail.Pickup -> "${d.item} · ${d.store.displayName}"
+    is ErrandDetail.ChargeAndDine -> "${d.restaurant.name} · ${d.charger.name}"
 }
 
 fun Errand.summary(): String = when (val d = detail) {
     is ErrandDetail.LateArrival -> buildString {
+        if (d.followUp) append("다시 늦어짐 · ")
         append("예약 ${d.appointment.hhmm()} → ${d.proposedTime.hhmm()}")
         if (d.companions.isNotEmpty()) append(" · 일행 ${d.companions.size}명 알림")
     }
     is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업 · 우회 ${d.store.detourMinutes}분 · 경유지 추가"
+    is ErrandDetail.ChargeAndDine -> "${d.arriveAt.hhmm()} 도착 · 충전 약 ${d.chargeMinutes}분 · 대기 ${d.restaurant.waitMinutes}분"
 }
 
 /** 진행 중일 때 지금 하는 단계. 승인 단계는 세지 않는다. */
 fun Errand.progressLine(): String? {
+    if (undoing) return "되돌리는 중"
     if (state != ErrandState.IN_PROGRESS) return null
     val work = steps.drop(1)
     val index = work.indexOfFirst { it.state == StepState.CURRENT }
@@ -76,13 +82,32 @@ fun Errand.outcomeLine(): String? = when (state) {
             if (d.companions.isNotEmpty()) append(" · 일행 ${d.companions.size}명에게 알렸어요")
         }
         is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업으로 주문하고 경유지에 추가했어요"
+        is ErrandDetail.ChargeAndDine -> "${d.restaurant.name} 줄서기를 등록하고 충전소를 경유지에 추가했어요"
     }
     ErrandState.FAILED -> {
         val step = steps.firstOrNull { it.state == StepState.FAILED }?.let { "${it.title.substringBefore(" · ")}에 실패했어요" } ?: "처리하지 못했어요"
         failureReason?.let { "$step · $it" } ?: step
     }
     ErrandState.DECLINED -> "거절해서 진행하지 않았어요"
+    ErrandState.CANCELLED -> {
+        // 일부를 못 했으면(정정 안내·경유지 삭제) 한 일만 말하고 못 한 일은 안내 문장으로 붙인다
+        val partial = undoNote != null
+        val done = when (val d = detail) {
+            is ErrandDetail.LateArrival ->
+                if (d.companions.isEmpty() || partial) "예약을 원래 시간으로 되돌렸어요" else "예약을 원래 시간으로 되돌리고 일행에게 정정 안내를 보냈어요"
+            is ErrandDetail.Pickup -> if (partial) "주문을 취소했어요" else "주문을 취소하고 경유지를 뺐어요"
+            is ErrandDetail.ChargeAndDine -> if (partial) "줄서기를 취소했어요" else "줄서기를 취소하고 경유지를 뺐어요"
+        }
+        undoNote?.let { "$done · $it" } ?: done
+    }
     else -> null
+}
+
+/** 주행 중 승인 방법 안내. PitCrew가 먼저 물은 일은 Gleo가 아니라 앱이 직접 답을 듣는다. */
+fun Errand.voiceApprovalHint(listening: Boolean): String = when {
+    origin != ErrandOrigin.SUGGESTED -> "주행 중에는 Gleo에게 \"응\"이라고 답해 승인해요"
+    listening -> "듣고 있어요 · \"응\" 또는 \"아니\"라고 답하세요"
+    else -> "정차하면 화면에서 승인할 수 있어요"
 }
 
 @Composable
@@ -93,10 +118,11 @@ fun ErrandCard(
     onApprove: () -> Unit,
     onDecline: () -> Unit,
     modifier: Modifier = Modifier,
+    listening: Boolean = false,
 ) {
     val colors = PcTheme.colors
     PcCard(modifier = modifier.fillMaxWidth(), onClick = onOpen) {
-        Text(errand.kindLabel(), style = PcTheme.type.label, color = colors.textSecondary)
+        Text(errand.originLabel(), style = PcTheme.type.label, color = colors.textSecondary)
         Spacer(Modifier.height(PcSpacing.s))
         Text(errand.title(), style = PcTheme.type.title, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(PcSpacing.xs))
@@ -110,14 +136,23 @@ fun ErrandCard(
         )
         if (errand.state == ErrandState.AWAITING_APPROVAL) {
             Spacer(Modifier.height(PcSpacing.l))
-            ApprovalActions(mode, onApprove, onDecline)
+            ApprovalActions(mode, onApprove, onDecline, voiceHint = errand.voiceApprovalHint(listening))
         }
     }
 }
 
+/** PitCrew가 먼저 제안한 일은 시킨 일과 구분해 표시한다. */
+fun Errand.originLabel(): String = if (origin == ErrandOrigin.SUGGESTED) "${kindLabel()} · 먼저 제안" else kindLabel()
+
 /** 주차 중에만 탭으로 승인한다. 주행 중이거나 규제 상태를 모르면 음성 승인 안내만 보인다. */
 @Composable
-fun ApprovalActions(mode: InteractionMode, onApprove: () -> Unit, onDecline: () -> Unit, modifier: Modifier = Modifier) {
+fun ApprovalActions(
+    mode: InteractionMode,
+    onApprove: () -> Unit,
+    onDecline: () -> Unit,
+    modifier: Modifier = Modifier,
+    voiceHint: String,
+) {
     if (mode == InteractionMode.TOUCH) {
         Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(PcSpacing.m)) {
             PcButton("거절", onDecline, kind = ButtonKind.BASIC, size = ButtonSize.LARGE, modifier = Modifier.weight(1f))
@@ -130,7 +165,7 @@ fun ApprovalActions(mode: InteractionMode, onApprove: () -> Unit, onDecline: () 
             horizontalArrangement = Arrangement.spacedBy(PcSpacing.s),
         ) {
             Icon(Icons.Rounded.Mic, contentDescription = null, tint = PcTheme.colors.attention, modifier = Modifier.size(32.dp))
-            Text("주행 중에는 Gleo에게 \"응\"이라고 답해 승인해요", style = PcTheme.type.body, color = PcTheme.colors.textSecondary)
+            Text(voiceHint, style = PcTheme.type.body, color = PcTheme.colors.textSecondary)
         }
     }
 }

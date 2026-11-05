@@ -29,8 +29,9 @@ class GleoActionReceiver : BroadcastReceiver() {
                     GleoResponse.fail(function, "The request parameters could not be read.")
                 }
                 GleoCallback.send(app, response)
-                // 앱 화면 없이 Gleo로만 주문해도 도착 직전 안내가 나가도록 한다
+                // 앱 화면 없이 Gleo로만 시켜도 도착 직전 안내와 먼저 묻기가 동작하도록 한다
                 app.announcer.start()
+                app.assistant.start()
             } finally {
                 pending.finish()
             }

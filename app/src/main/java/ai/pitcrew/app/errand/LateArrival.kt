@@ -6,6 +6,7 @@ import ai.pitcrew.app.data.ReservationRepository
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.gleo.GleoActionHandler
@@ -35,8 +36,10 @@ object LateArrivalPlanner {
     fun arrivalAt(now: LocalDateTime, remainSeconds: Int): LocalDateTime =
         now.plusSeconds(remainSeconds.toLong().coerceAtLeast(0) + 30).truncatedTo(ChronoUnit.MINUTES)
 
-    fun plan(appointmentTime: LocalTime, now: LocalDateTime, remainSeconds: Int): LateArrivalPlan {
-        val appointment = nearestOccurrence(appointmentTime, now)
+    fun plan(appointmentTime: LocalTime, now: LocalDateTime, remainSeconds: Int): LateArrivalPlan =
+        plan(nearestOccurrence(appointmentTime, now), now, remainSeconds)
+
+    fun plan(appointment: LocalDateTime, now: LocalDateTime, remainSeconds: Int): LateArrivalPlan {
         val arrival = arrivalAt(now, remainSeconds)
         val delayMinutes = Duration.between(appointment, arrival).toMinutes()
         val proposed = if (delayMinutes > 0) roundUp(arrival).toLocalTime() else null
@@ -106,20 +109,40 @@ class LateArrivalUseCase(
         if (!plan.isLate) return LateArrivalOutcome.OnTime(plan, reservation)
         if (reservation == null) return LateArrivalOutcome.NoReservation(plan)
 
+        val proposedTime = approvedTime?.let { closestHalfDay(it, plan.proposedTime!!) } ?: plan.proposedTime!!
+        val errand = propose(reservation, plan, proposedTime, ErrandOrigin.REQUESTED, followUp = wasRescheduled(reservation))
+        if (approvedTime == null) return LateArrivalOutcome.AwaitingApproval(errand, plan, reservation)
+        return LateArrivalOutcome.Finished(errands.approve(errand.id, channel), plan, reservation)
+    }
+
+    /** 경로 감시가 늦음을 알아챘을 때 PitCrew 제안으로 올린다. 늦지 않으면 null. */
+    suspend fun suggest(reservation: Reservation, remainSeconds: Int): Errand? {
+        contacts.ensureLoaded()
+        val plan = LateArrivalPlanner.plan(reservation.time, now(), remainSeconds)
+        val proposedTime = plan.proposedTime ?: return null
+        return propose(reservation, plan, proposedTime, ErrandOrigin.SUGGESTED, followUp = wasRescheduled(reservation))
+    }
+
+    private fun propose(reservation: Reservation, plan: LateArrivalPlan, proposedTime: LocalTime, origin: ErrandOrigin, followUp: Boolean): Errand {
         val companions = reservation.companionIds.mapNotNull { id -> contacts.contacts.value.firstOrNull { it.id == id } }
-        val errand = errands.propose(
+        return errands.propose(
             ErrandDetail.LateArrival(
                 reservationId = reservation.id,
                 placeName = reservation.placeName,
                 appointment = plan.appointment,
                 estimatedArrival = plan.estimatedArrival,
                 delayMinutes = plan.delayMinutes,
-                proposedTime = approvedTime?.let { closestHalfDay(it, plan.proposedTime!!) } ?: plan.proposedTime!!,
+                proposedTime = proposedTime,
                 companions = companions,
+                followUp = followUp,
             ),
+            origin,
         )
-        if (approvedTime == null) return LateArrivalOutcome.AwaitingApproval(errand, plan, reservation)
-        return LateArrivalOutcome.Finished(errands.approve(errand.id, channel), plan, reservation)
+    }
+
+    // 이 예약을 이미 한 번 미뤘고 무르지 않았으면 또 늦는 경우다
+    private fun wasRescheduled(reservation: Reservation): Boolean = errands.errands.value.any {
+        it.state == ErrandState.COMPLETED && (it.detail as? ErrandDetail.LateArrival)?.reservationId == reservation.id
     }
 
     // 말한 시각과 15분 안쪽인 예약을 같은 약속으로 본다

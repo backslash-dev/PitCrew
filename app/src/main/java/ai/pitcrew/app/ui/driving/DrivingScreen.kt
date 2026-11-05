@@ -1,12 +1,14 @@
 package ai.pitcrew.app.ui.driving
 
 import ai.pitcrew.app.domain.Errand
+import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.errand.LateArrivalPlanner
 import ai.pitcrew.app.platform.Destination
 import ai.pitcrew.app.ui.errand.outcomeLine
 import ai.pitcrew.app.ui.errand.progressLine
 import ai.pitcrew.app.ui.errand.title
+import ai.pitcrew.app.ui.errand.voiceApprovalHint
 import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.format.minutesLabel
 import ai.pitcrew.app.ui.theme.PcSpacing
@@ -37,7 +39,7 @@ import java.time.LocalDateTime
  * 움직이는 요소도 없다(주의분산 가이드).
  */
 @Composable
-fun DrivingScreen(destination: Destination?, errands: List<Errand>, now: LocalDateTime) {
+fun DrivingScreen(destination: Destination?, errands: List<Errand>, now: LocalDateTime, listening: Boolean) {
     val colors = PcTheme.colors
     val focus = drivingFocus(errands, now)
     Column(
@@ -71,12 +73,20 @@ fun DrivingScreen(destination: Destination?, errands: List<Errand>, now: LocalDa
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PcSpacing.m)) {
             Icon(Icons.Rounded.Mic, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(40.dp))
             Text(
-                if (focus?.state == ErrandState.AWAITING_APPROVAL) "Gleo에게 \"응\" 또는 \"아니\"라고 답하세요" else "Gleo를 부르고 \"피트크루 앱으로…\"라고 말하세요",
+                drivingHint(focus, now, listening),
                 style = PcTheme.type.bodyLarge,
                 color = colors.textSecondary,
             )
         }
     }
+}
+
+internal fun drivingHint(focus: Errand?, now: LocalDateTime, listening: Boolean): String = when {
+    focus == null -> "Gleo를 부르고 \"피트크루 앱으로…\"라고 말하세요"
+    focus.state == ErrandState.AWAITING_APPROVAL && focus.origin == ErrandOrigin.SUGGESTED -> focus.voiceApprovalHint(listening)
+    focus.state == ErrandState.AWAITING_APPROVAL -> "Gleo에게 \"응\" 또는 \"아니\"라고 답하세요"
+    focus.canUndo(now) -> "되돌리려면 Gleo에게 \"피트크루 앱으로 방금 거 취소해\""
+    else -> "Gleo를 부르고 \"피트크루 앱으로…\"라고 말하세요"
 }
 
 /** 승인 대기 > 진행 중 > 10분 안에 끝난 작업 순으로 하나만 보여준다. */

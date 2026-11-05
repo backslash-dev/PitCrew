@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Mic
@@ -58,6 +59,7 @@ data class HomeState(
     val contacts: List<Contact>,
     val now: LocalDateTime,
     val voice: VoiceCommandState,
+    val listening: Boolean,
 )
 
 class HomeActions(
@@ -70,6 +72,7 @@ class HomeActions(
     val startVoice: () -> Unit,
     val cancelVoice: () -> Unit,
     val dismissVoice: () -> Unit,
+    val undo: (String) -> Unit,
 )
 
 @Composable
@@ -172,16 +175,23 @@ private fun WorkPanel(state: HomeState, actions: HomeActions, modifier: Modifier
                     onOpen = { actions.openErrand(errand.id) },
                     onApprove = { actions.approve(errand.id) },
                     onDecline = { actions.decline(errand.id) },
+                    listening = state.listening,
                 )
             }
         }
         if (recent.isNotEmpty()) {
             SectionHeader("최근", trailing = { TextAction("전체 기록", actions.openHistory) })
             recent.forEach { errand ->
+                val undoable = errand.canUndo(state.now) && state.driving.interactionMode == InteractionMode.TOUCH
                 ListRow(
                     errand.title(),
                     supporting = "${errand.outcomeLine().orEmpty()} · ${relativeLabel(errand.finishedAt ?: errand.createdAt, state.now)}",
-                    leading = if (errand.state == ErrandState.COMPLETED) Icons.Rounded.CheckCircle else Icons.Rounded.ErrorOutline,
+                    leading = when (errand.state) {
+                        ErrandState.COMPLETED -> Icons.Rounded.CheckCircle
+                        ErrandState.CANCELLED -> Icons.AutoMirrored.Rounded.Undo
+                        else -> Icons.Rounded.ErrorOutline
+                    },
+                    trailing = if (undoable) ({ TextAction("되돌리기", { actions.undo(errand.id) }) }) else null,
                     onClick = { actions.openErrand(errand.id) },
                 )
             }
@@ -213,6 +223,7 @@ fun VoiceHintCard(modifier: Modifier = Modifier, title: String? = "지금 처리
 val VOICE_EXAMPLES = listOf(
     "피트크루 앱으로 7시 예약 지각 처리해줘",
     "가는 길에 아메리카노 픽업 주문해줘",
+    "피트크루 앱으로 방금 거 취소해줘",
 )
 
 @Composable

@@ -4,6 +4,7 @@ import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
 import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.mock.MockStepExecutor
+import ai.pitcrew.app.testing.FakeWaypoints
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
@@ -91,7 +92,7 @@ class LateArrivalHandlerTest {
     private val reservations = InMemoryReservationRepository(
         listOf(Reservation("r1", "온담 한식당", LocalDateTime.of(2026, 11, 5, 19, 0), 3, listOf("c-minsu", "c-seoyeon"))),
     )
-    private val errands = ErrandRunner(MockStepExecutor { true }, now = { now }, stepDelayMillis = 0)
+    private val errands = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }, stepDelayMillis = 0)
 
     private fun handler(destination: suspend () -> Destination?) =
         LateArrivalHandler(LateArrivalUseCase(destination, errands, reservations, contacts) { now })
