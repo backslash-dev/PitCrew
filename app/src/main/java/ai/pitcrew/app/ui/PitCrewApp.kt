@@ -2,7 +2,11 @@ package ai.pitcrew.app.ui
 
 import ai.pitcrew.app.PitCrewApplication
 import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.errand.PickupOutcome
+import ai.pitcrew.app.errand.PickupPlanner
+import ai.pitcrew.app.ui.errand.StoreOption
 import ai.pitcrew.app.ui.components.NavRail
 import ai.pitcrew.app.ui.components.RailItem
 import ai.pitcrew.app.ui.diagnostics.DiagnosticsScreen
@@ -32,6 +36,8 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,6 +91,7 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
     val errands by app.errands.errands.collectAsStateWithLifecycle()
     val reservations by app.reservations.reservations.collectAsStateWithLifecycle()
     val contacts by app.contacts.contacts.collectAsStateWithLifecycle()
+    val voice by app.voiceCommands.state.collectAsStateWithLifecycle()
     val now by produceState(LocalDateTime.now()) {
         while (true) {
             delay(CLOCK_TICK_MILLIS)
@@ -99,6 +106,7 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
     }
 
     val nav = rememberNavController()
+    val uiScope = rememberCoroutineScope()
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
     val pending = errands.count { it.state == ErrandState.AWAITING_APPROVAL }
@@ -124,7 +132,7 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
             NavHost(nav, startDestination = Routes.HOME) {
                 composable(Routes.HOME) {
                     HomeScreen(
-                        HomeState(driving, destination, errands, reservations, contacts, now),
+                        HomeState(driving, destination, errands, reservations, contacts, now, voice),
                         HomeActions(
                             openErrand = { nav.navigate(Routes.errand(it)) },
                             approve = { approve(it, ApprovalChannel.TOUCH) },
@@ -132,19 +140,39 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
                             openReservation = { nav.navigate(Routes.reservation(it)) },
                             openReservations = { nav.navigateTopLevel(Routes.RESERVATIONS) },
                             openHistory = { nav.navigateTopLevel(Routes.HISTORY) },
+                            startVoice = app.voiceCommands::start,
+                            cancelVoice = app.voiceCommands::cancel,
+                            dismissVoice = app.voiceCommands::dismiss,
                         ),
                         width,
                     )
                 }
                 composable(Routes.ERRAND, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
                     val id = entry.arguments?.getString("id")
+                    val errand = errands.firstOrNull { it.id == id }
+                    val storeOptions = remember(errand?.id, destination, now) {
+                        val remain = destination?.remainTimeSeconds ?: return@remember emptyList()
+                        if (errand?.detail !is ErrandDetail.Pickup) return@remember emptyList()
+                        app.pickup.candidates().map { StoreOption(it, PickupPlanner.readyAt(it, now, remain)) }
+                    }
                     ErrandDetailScreen(
-                        errand = errands.firstOrNull { it.id == id },
+                        errand = errand,
                         mode = driving.interactionMode,
                         width = width,
                         onBack = { nav.popBackStack() },
                         onApprove = approve,
                         onDecline = app.errands::decline,
+                        storeOptions = storeOptions,
+                        onSwitchStore = { store ->
+                            val item = (errand?.detail as? ErrandDetail.Pickup)?.item ?: return@ErrandDetailScreen
+                            uiScope.launch {
+                                // 같은 픽업 제안은 새 제안으로 바뀌므로 새 작업 화면으로 갈아탄다
+                                val outcome = app.pickup.switchStore(item, store)
+                                if (outcome is PickupOutcome.AwaitingApproval) {
+                                    nav.navigate(Routes.errand(outcome.errand.id)) { popUpTo(Routes.ERRAND) { inclusive = true } }
+                                }
+                            }
+                        },
                     )
                 }
                 composable(Routes.RESERVATIONS) {

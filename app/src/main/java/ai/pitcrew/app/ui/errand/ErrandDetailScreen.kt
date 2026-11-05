@@ -4,6 +4,7 @@ import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.Store
 import ai.pitcrew.app.platform.InteractionMode
 import ai.pitcrew.app.ui.components.EmptyState
 import ai.pitcrew.app.ui.components.Hairline
@@ -34,11 +35,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import java.time.LocalTime
 
 @Composable
 fun ErrandDetailScreen(
@@ -48,6 +51,8 @@ fun ErrandDetailScreen(
     onBack: () -> Unit,
     onApprove: (String, ApprovalChannel) -> Unit,
     onDecline: (String) -> Unit,
+    storeOptions: List<StoreOption> = emptyList(),
+    onSwitchStore: (Store) -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
         ScreenHeader(errand?.kindLabel() ?: "작업", onBack = onBack)
@@ -82,11 +87,13 @@ fun ErrandDetailScreen(
                 Spacer(Modifier.height(PcSpacing.l))
                 timeline()
                 Companions(errand)
+                OtherStores(errand, mode, storeOptions, onSwitchStore)
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
                     Column(Modifier.weight(1f)) {
                         figures()
                         Companions(errand)
+                        OtherStores(errand, mode, storeOptions, onSwitchStore)
                     }
                     Column(Modifier.weight(1f)) { timeline() }
                 }
@@ -125,6 +132,29 @@ private fun Figures(errand: Errand) {
                     KeyFigure("조리", "${d.store.prepMinutes}분", Modifier.widthIn(min = 160.dp))
                 }
             }
+        }
+    }
+}
+
+/** 상세 화면에서 다른 매장으로 바꿀 때 보여줄 후보. 픽업 시각은 화면에서 미리 계산해 넘긴다. */
+data class StoreOption(val store: Store, val readyAt: LocalTime)
+
+@Composable
+private fun OtherStores(errand: Errand, mode: InteractionMode, options: List<StoreOption>, onSwitch: (Store) -> Unit) {
+    val d = errand.detail as? ErrandDetail.Pickup ?: return
+    if (errand.state != ErrandState.AWAITING_APPROVAL || mode != InteractionMode.TOUCH) return
+    val others = options.filter { it.store.id != d.store.id }
+    if (others.isEmpty()) return
+    Spacer(Modifier.height(PcSpacing.l))
+    SectionHeader("다른 매장")
+    Column(verticalArrangement = Arrangement.spacedBy(PcSpacing.xs)) {
+        others.forEach { option ->
+            ListRow(
+                option.store.displayName,
+                supporting = "${option.readyAt.hhmm()} 픽업 · 우회 ${option.store.detourMinutes}분",
+                leading = Icons.Rounded.Storefront,
+                onClick = { onSwitch(option.store) },
+            )
         }
     }
 }
