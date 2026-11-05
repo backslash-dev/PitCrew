@@ -23,6 +23,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 
+data class WaypointStatus(
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val remainTimeSeconds: Int,
+    val remainDistanceMeters: Int,
+)
+
 data class Destination(
     val name: String,
     // 문서에 단위가 없음. 에뮬레이터 실측값(약 1시간 경로에 3600)으로 초 단위로 판단
@@ -41,18 +49,29 @@ class NavigationClient(context: Context) : AutoCloseable {
 
     private val destinationReplies = MutableSharedFlow<Destination?>(extraBufferCapacity = 1)
 
+    private val _waypoints = MutableStateFlow<List<WaypointStatus>>(emptyList())
+    val waypoints: StateFlow<List<WaypointStatus>> = _waypoints.asStateFlow()
+
     private val listener = object : NaviHelperEventListener {
         override fun onRouteStarted(info: RouteStartInfo) = refreshDestination()
         override fun onRoutingCompleted() = refreshDestination()
-        override fun onRouteCancelled() { _destination.value = null }
-        override fun onRouteEnded() { _destination.value = null }
+        override fun onRouteCancelled() {
+            _destination.value = null
+            _waypoints.value = emptyList()
+        }
+        override fun onRouteEnded() {
+            _destination.value = null
+            _waypoints.value = emptyList()
+        }
         override fun onDestinationChanged() = refreshDestination()
         override fun onDestinationInfo(info: DestinationInfo) {
             val destination = info.toDestination()
             _destination.value = destination
             destinationReplies.tryEmit(destination)
         }
-        override fun onWayPointInfo(list: List<WaypointInfo>) {}
+        override fun onWayPointInfo(list: List<WaypointInfo>) {
+            _waypoints.value = list.map { WaypointStatus(it.name, it.latitude, it.longitude, it.remainTime, it.remainDistance) }
+        }
         override fun onRouteStateInfo(info: RouteStateInfo) {}
         override fun onTripInfo(info: TripInfo) {}
         override fun onTBTInfo(list: List<TBTInfo>) {}
@@ -84,6 +103,11 @@ class NavigationClient(context: Context) : AutoCloseable {
     fun refreshDestination() {
         if (_status.value != SdkStatus.Ready) return
         runCatching { navi.getDestinationInfo() }.onFailure { Log.w(TAG, "destination query failed", it) }
+    }
+
+    fun refreshWaypoints() {
+        if (_status.value != SdkStatus.Ready) return
+        runCatching { navi.getWaypointInfo() }.onFailure { Log.w(TAG, "waypoint query failed", it) }
     }
 
     /**

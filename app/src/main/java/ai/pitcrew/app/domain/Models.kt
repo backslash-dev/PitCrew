@@ -60,6 +60,7 @@ data class Errand(
     val approvedVia: ApprovalChannel? = null,
     val finishedAt: LocalDateTime? = null,
     val failureReason: String? = null,
+    val arrivalAnnouncedAt: LocalDateTime? = null,
 ) {
     val isActive: Boolean get() = state == ErrandState.AWAITING_APPROVAL || state == ErrandState.IN_PROGRESS
 }

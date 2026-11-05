@@ -101,6 +101,8 @@ class MockErrandService(
         )
     }
 
+    override fun markArrivalAnnounced(id: String) = update(id) { it.copy(arrivalAnnouncedAt = now()) }
+
     private suspend fun runStep(detail: ErrandDetail, stepIndex: Int): Boolean = when (detail) {
         is ErrandDetail.Pickup -> if (stepIndex == plannedSteps(detail).size) addWaypoint(detail.store) else true
         is ErrandDetail.LateArrival -> true
