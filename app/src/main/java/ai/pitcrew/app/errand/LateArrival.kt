@@ -4,6 +4,7 @@ import ai.pitcrew.app.data.ContactRepository
 import ai.pitcrew.app.data.ErrandService
 import ai.pitcrew.app.data.ReservationRepository
 import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.Reservation
@@ -61,13 +62,62 @@ object LateArrivalPlanner {
     }
 }
 
-class LateArrivalHandler(
+sealed interface LateArrivalOutcome {
+    data object NoRoute : LateArrivalOutcome
+    data object NavigationUnavailable : LateArrivalOutcome
+    data class OnTime(val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
+    data class AwaitingApproval(val errand: Errand, val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
+    data class Finished(val errand: Errand, val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
+}
+
+/** 지각 판단과 실행. Gleo·앱 음성 입력이 같이 쓴다. */
+class LateArrivalUseCase(
     private val fetchDestination: suspend () -> Destination?,
     private val errands: ErrandService,
     private val reservations: ReservationRepository,
     private val contacts: ContactRepository,
     private val now: () -> LocalDateTime = LocalDateTime::now,
-) : GleoActionHandler {
+) {
+    /** [approvedTime]이 있으면 사용자가 그 시간으로 이미 승인한 것으로 보고 바로 실행한다. */
+    suspend fun run(appointment: LocalTime, approvedTime: LocalTime? = null, channel: ApprovalChannel = ApprovalChannel.VOICE): LateArrivalOutcome {
+        val destination = try {
+            fetchDestination()
+        } catch (e: SdkUnavailableException) {
+            return LateArrivalOutcome.NavigationUnavailable
+        } ?: return LateArrivalOutcome.NoRoute
+
+        val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
+        val reservation = matchReservation(plan.appointment)
+        if (!plan.isLate) return LateArrivalOutcome.OnTime(plan, reservation)
+
+        val companions = reservation?.companionIds.orEmpty().mapNotNull { id -> contacts.contacts.value.firstOrNull { it.id == id } }
+        val errand = errands.propose(
+            ErrandDetail.LateArrival(
+                reservationId = reservation?.id,
+                placeName = reservation?.placeName,
+                appointment = plan.appointment,
+                estimatedArrival = plan.estimatedArrival,
+                delayMinutes = plan.delayMinutes,
+                proposedTime = approvedTime ?: plan.proposedTime!!,
+                companions = companions,
+            ),
+        )
+        if (approvedTime == null) return LateArrivalOutcome.AwaitingApproval(errand, plan, reservation)
+        return LateArrivalOutcome.Finished(errands.approve(errand.id, channel), plan, reservation)
+    }
+
+    // 말한 시각과 15분 안쪽인 예약을 같은 약속으로 본다
+    private fun matchReservation(appointment: LocalDateTime): Reservation? =
+        reservations.reservations.value
+            .filter { Duration.between(it.time, appointment).abs() <= MATCH_WINDOW }
+            .minByOrNull { Duration.between(it.time, appointment).abs() }
+
+    private companion object {
+        val MATCH_WINDOW: Duration = Duration.ofMinutes(15)
+    }
+}
+
+class LateArrivalHandler(private val useCase: LateArrivalUseCase) : GleoActionHandler {
     private val function = GleoFunction.NOTIFY_LATE_ARRIVAL
 
     override suspend fun handle(request: GleoRequest): GleoResponse {
@@ -77,63 +127,40 @@ class LateArrivalHandler(
                 "The appointment time is required in 24-hour HH:mm format.",
                 listOf(mapOf("missingField" to "appointmentTime")),
             )
-
-        val destination = try {
-            fetchDestination()
-        } catch (e: SdkUnavailableException) {
-            return GleoResponse.fail(function, "The navigation service is not available, so the arrival time is unknown.")
-        } ?: return GleoResponse.fail(function, "There is no active navigation route, so the arrival time is unknown.")
-
-        val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
-        val reservation = matchReservation(plan.appointment)
-        val data = plan.toData(reservation)
-
-        if (!plan.isLate) {
-            return GleoResponse.success(function, "The driver is expected to arrive on time, so no change is needed.", data)
-        }
-
         val confirmedTime = parseClockTime(request.params.optString("confirmedTime"))
-        val proposedTime = confirmedTime ?: plan.proposedTime!!
-        val companions = reservation?.companionIds.orEmpty().mapNotNull { id -> contacts.contacts.value.firstOrNull { it.id == id } }
-        val errand = errands.propose(
-            ErrandDetail.LateArrival(
-                reservationId = reservation?.id,
-                placeName = reservation?.placeName,
-                appointment = plan.appointment,
-                estimatedArrival = plan.estimatedArrival,
-                delayMinutes = plan.delayMinutes,
-                proposedTime = proposedTime,
-                companions = companions,
-            ),
-        )
-        val place = reservation?.placeName?.let { " at $it" }.orEmpty()
 
-        if (confirmedTime == null) {
-            return GleoResponse.asking(
-                function,
-                "The driver is expected to be ${plan.delayMinutes} minutes late for the reservation$place. " +
-                    "User approval is required to change it to ${proposedTime.toClockTime()} and notify ${companions.size} companions.",
-                data,
-            )
-        }
-
-        val result = errands.approve(errand.id, ApprovalChannel.VOICE)
-        return when (result.state) {
-            ErrandState.COMPLETED -> GleoResponse.success(
-                function,
-                "The reservation$place was changed to ${proposedTime.toClockTime()} and ${companions.size} companions were notified.",
-                listOf(data.first() + ("confirmedTime" to proposedTime.toClockTime())),
-            )
-            ErrandState.DECLINED -> GleoResponse.fail(function, "The user declined this change on the screen.")
-            else -> GleoResponse.fail(function, "Changing the reservation failed: ${result.failureReason ?: "unknown error"}.")
+        return when (val outcome = useCase.run(appointment, confirmedTime, ApprovalChannel.VOICE)) {
+            LateArrivalOutcome.NavigationUnavailable ->
+                GleoResponse.fail(function, "The navigation service is not available, so the arrival time is unknown.")
+            LateArrivalOutcome.NoRoute ->
+                GleoResponse.fail(function, "There is no active navigation route, so the arrival time is unknown.")
+            is LateArrivalOutcome.OnTime ->
+                GleoResponse.success(function, "The driver is expected to arrive on time, so no change is needed.", outcome.plan.toData(outcome.reservation))
+            is LateArrivalOutcome.AwaitingApproval -> {
+                val detail = outcome.errand.detail as ErrandDetail.LateArrival
+                GleoResponse.asking(
+                    function,
+                    "The driver is expected to be ${outcome.plan.delayMinutes} minutes late for the reservation${outcome.reservation.place()}. " +
+                        "User approval is required to change it to ${detail.proposedTime.toClockTime()} and notify ${detail.companions.size} companions.",
+                    outcome.plan.toData(outcome.reservation),
+                )
+            }
+            is LateArrivalOutcome.Finished -> {
+                val detail = outcome.errand.detail as ErrandDetail.LateArrival
+                when (outcome.errand.state) {
+                    ErrandState.COMPLETED -> GleoResponse.success(
+                        function,
+                        "The reservation${outcome.reservation.place()} was changed to ${detail.proposedTime.toClockTime()} and ${detail.companions.size} companions were notified.",
+                        listOf(outcome.plan.toData(outcome.reservation).first() + ("confirmedTime" to detail.proposedTime.toClockTime())),
+                    )
+                    ErrandState.DECLINED -> GleoResponse.fail(function, "The user declined this change on the screen.")
+                    else -> GleoResponse.fail(function, "Changing the reservation failed: ${outcome.errand.failureReason ?: "unknown error"}.")
+                }
+            }
         }
     }
 
-    // 말한 시각과 15분 안쪽인 오늘 예약을 같은 약속으로 본다
-    private fun matchReservation(appointment: LocalDateTime): Reservation? =
-        reservations.reservations.value
-            .filter { Duration.between(it.time, appointment).abs() <= MATCH_WINDOW }
-            .minByOrNull { Duration.between(it.time, appointment).abs() }
+    private fun Reservation?.place(): String = this?.placeName?.let { " at $it" }.orEmpty()
 
     private fun LateArrivalPlan.toData(reservation: Reservation?): List<Map<String, Any>> = listOf(
         buildMap {
@@ -144,8 +171,4 @@ class LateArrivalHandler(
             proposedTime?.let { put("proposedTime", it.toClockTime()) }
         },
     )
-
-    private companion object {
-        val MATCH_WINDOW: Duration = Duration.ofMinutes(15)
-    }
 }

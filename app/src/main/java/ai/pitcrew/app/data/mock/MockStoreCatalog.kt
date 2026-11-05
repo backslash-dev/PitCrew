@@ -11,6 +11,8 @@ class MockStoreCatalog(private val stores: List<Store> = DEFAULT_STORES) : Store
         return candidates.minByOrNull { it.detourMinutes }
     }
 
+    override fun candidatesOnRoute(): List<Store> = stores.sortedBy { it.detourMinutes }
+
     companion object {
         val DEFAULT_STORES = listOf(
             Store("s-semo-yeoksam", "세모 커피", "역삼점", 37.5006, 127.0364, detourMinutes = 2, prepMinutes = 6),

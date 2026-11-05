@@ -93,7 +93,7 @@ class LateArrivalHandlerTest {
     private val errands = MockErrandService(addWaypoint = { true }, now = { now }, stepDelayMillis = 0)
 
     private fun handler(destination: suspend () -> Destination?) =
-        LateArrivalHandler(destination, errands, reservations, contacts) { now }
+        LateArrivalHandler(LateArrivalUseCase(destination, errands, reservations, contacts) { now })
 
     private fun request(vararg params: Pair<String, String>) =
         GleoRequest(GleoFunction.NOTIFY_LATE_ARRIVAL, JSONObject(params.toMap()))

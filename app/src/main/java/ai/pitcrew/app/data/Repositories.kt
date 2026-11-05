@@ -23,6 +23,9 @@ interface ReservationRepository {
 interface StoreCatalog {
     /** 경로상 매장을 찾는다. 이름이 없으면 우회 시간이 가장 짧은 곳. */
     fun findOnRoute(storeName: String?): Store?
+
+    /** 우회 시간이 짧은 순서의 경로상 매장 후보. */
+    fun candidatesOnRoute(): List<Store>
 }
 
 /** 승인이 필요한 차 밖 작업(예약 변경·픽업 주문)을 만들고 실행한다. 서버가 붙으면 구현만 교체한다. */
@@ -35,4 +38,6 @@ interface ErrandService {
     suspend fun approve(id: String, channel: ApprovalChannel): Errand
 
     fun decline(id: String)
+
+    fun markArrivalAnnounced(id: String)
 }

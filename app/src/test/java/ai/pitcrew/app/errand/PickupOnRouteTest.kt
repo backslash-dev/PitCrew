@@ -19,7 +19,7 @@ class PickupOnRouteTest {
     private val route = Destination("집", remainTimeSeconds = 30 * 60, remainDistanceMeters = 12_000)
     private var waypointResult = true
     private val errands = MockErrandService(addWaypoint = { waypointResult }, now = { now }, stepDelayMillis = 0)
-    private val handler = PickupOnRouteHandler({ route }, MockStoreCatalog(), errands) { now }
+    private val handler = PickupOnRouteHandler(PickupUseCase({ route }, MockStoreCatalog(), errands) { now })
 
     private fun request(vararg params: Pair<String, Any>) =
         GleoRequest(GleoFunction.ORDER_PICKUP_ON_ROUTE, JSONObject(params.toMap()))
@@ -31,7 +31,7 @@ class PickupOnRouteTest {
 
     @Test
     fun `경로가 없으면 실패로 응답한다`() = runTest {
-        val noRoute = PickupOnRouteHandler({ null }, MockStoreCatalog(), errands) { now }
+        val noRoute = PickupOnRouteHandler(PickupUseCase({ null }, MockStoreCatalog(), errands) { now })
         assertEquals(GleoStatus.FAIL, noRoute.handle(request("item" to "아메리카노")).status)
     }
 

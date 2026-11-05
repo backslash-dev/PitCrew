@@ -3,6 +3,7 @@ package ai.pitcrew.app.errand
 import ai.pitcrew.app.data.ErrandService
 import ai.pitcrew.app.data.StoreCatalog
 import ai.pitcrew.app.domain.ApprovalChannel
+import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.Store
@@ -29,12 +30,45 @@ object PickupPlanner {
     }
 }
 
-class PickupOnRouteHandler(
+sealed interface PickupOutcome {
+    data object NoRoute : PickupOutcome
+    data object NavigationUnavailable : PickupOutcome
+    data object NoStore : PickupOutcome
+    data class AwaitingApproval(val errand: Errand) : PickupOutcome
+    data class Finished(val errand: Errand) : PickupOutcome
+}
+
+/** 경로상 픽업 주문. Gleo·앱 음성 입력·매장 변경이 같이 쓴다. */
+class PickupUseCase(
     private val fetchDestination: suspend () -> Destination?,
     private val stores: StoreCatalog,
     private val errands: ErrandService,
     private val now: () -> LocalDateTime = LocalDateTime::now,
-) : GleoActionHandler {
+) {
+    suspend fun run(item: String, storeName: String? = null, confirmed: Boolean = false, channel: ApprovalChannel = ApprovalChannel.VOICE): PickupOutcome {
+        val store = stores.findOnRoute(storeName) ?: return PickupOutcome.NoStore
+        return order(item, store, confirmed, channel)
+    }
+
+    /** 승인 전 제안의 매장을 바꾼다. 픽업 시각은 새 매장 기준으로 다시 계산한다. */
+    suspend fun switchStore(item: String, store: Store): PickupOutcome = order(item, store, confirmed = false, channel = ApprovalChannel.TOUCH)
+
+    fun candidates(): List<Store> = stores.candidatesOnRoute()
+
+    private suspend fun order(item: String, store: Store, confirmed: Boolean, channel: ApprovalChannel): PickupOutcome {
+        val destination = try {
+            fetchDestination()
+        } catch (e: SdkUnavailableException) {
+            return PickupOutcome.NavigationUnavailable
+        } ?: return PickupOutcome.NoRoute
+        val readyAt = PickupPlanner.readyAt(store, now(), destination.remainTimeSeconds)
+        val errand = errands.propose(ErrandDetail.Pickup(item, store, readyAt))
+        if (!confirmed) return PickupOutcome.AwaitingApproval(errand)
+        return PickupOutcome.Finished(errands.approve(errand.id, channel))
+    }
+}
+
+class PickupOnRouteHandler(private val useCase: PickupUseCase) : GleoActionHandler {
     private val function = GleoFunction.ORDER_PICKUP_ON_ROUTE
 
     override suspend fun handle(request: GleoRequest): GleoResponse {
@@ -46,46 +80,46 @@ class PickupOnRouteHandler(
                 listOf(mapOf("missingField" to "item")),
             )
         }
-
-        val destination = try {
-            fetchDestination()
-        } catch (e: SdkUnavailableException) {
-            return GleoResponse.fail(function, "The navigation service is not available, so the route is unknown.")
-        } ?: return GleoResponse.fail(function, "There is no active navigation route to find a pickup store along.")
-
         val storeName = request.params.optString("storeName").trim().takeIf { it.isNotEmpty() }
-        val store = stores.findOnRoute(storeName)
-            ?: return GleoResponse.fail(function, "No pickup store matching the request was found along the route.")
+        val confirmed = request.params.optBoolean("confirmed", false)
 
-        val readyAt = PickupPlanner.readyAt(store, now(), destination.remainTimeSeconds)
-        val errand = errands.propose(ErrandDetail.Pickup(item, store, readyAt))
-        val data = listOf(
-            mapOf(
-                "item" to item,
-                "store" to store.displayName,
-                "pickupTime" to readyAt.toClockTime(),
-                "detourMinutes" to store.detourMinutes,
-            ),
-        )
-
-        if (!request.params.optBoolean("confirmed", false)) {
-            return GleoResponse.asking(
-                function,
-                "User approval is required to order $item from ${store.displayName} for pickup at ${readyAt.toClockTime()}, " +
-                    "which adds about ${store.detourMinutes} minutes to the route.",
-                data,
-            )
-        }
-
-        val result = errands.approve(errand.id, ApprovalChannel.VOICE)
-        return when (result.state) {
-            ErrandState.COMPLETED -> GleoResponse.success(
-                function,
-                "Ordered $item from ${store.displayName} for pickup at ${readyAt.toClockTime()} and added the store as a waypoint.",
-                data,
-            )
-            ErrandState.DECLINED -> GleoResponse.fail(function, "The user declined this order on the screen.")
-            else -> GleoResponse.fail(function, "Placing the pickup order failed: ${result.failureReason ?: "unknown error"}.")
+        return when (val outcome = useCase.run(item, storeName, confirmed, ApprovalChannel.VOICE)) {
+            PickupOutcome.NavigationUnavailable ->
+                GleoResponse.fail(function, "The navigation service is not available, so the route is unknown.")
+            PickupOutcome.NoRoute ->
+                GleoResponse.fail(function, "There is no active navigation route to find a pickup store along.")
+            PickupOutcome.NoStore ->
+                GleoResponse.fail(function, "No pickup store matching the request was found along the route.")
+            is PickupOutcome.AwaitingApproval -> {
+                val d = outcome.errand.detail as ErrandDetail.Pickup
+                GleoResponse.asking(
+                    function,
+                    "User approval is required to order ${d.item} from ${d.store.displayName} for pickup at ${d.readyAt.toClockTime()}, " +
+                        "which adds about ${d.store.detourMinutes} minutes to the route.",
+                    d.toData(),
+                )
+            }
+            is PickupOutcome.Finished -> {
+                val d = outcome.errand.detail as ErrandDetail.Pickup
+                when (outcome.errand.state) {
+                    ErrandState.COMPLETED -> GleoResponse.success(
+                        function,
+                        "Ordered ${d.item} from ${d.store.displayName} for pickup at ${d.readyAt.toClockTime()} and added the store as a waypoint.",
+                        d.toData(),
+                    )
+                    ErrandState.DECLINED -> GleoResponse.fail(function, "The user declined this order on the screen.")
+                    else -> GleoResponse.fail(function, "Placing the pickup order failed: ${outcome.errand.failureReason ?: "unknown error"}.")
+                }
+            }
         }
     }
+
+    private fun ErrandDetail.Pickup.toData(): List<Map<String, Any>> = listOf(
+        mapOf(
+            "item" to item,
+            "store" to store.displayName,
+            "pickupTime" to readyAt.toClockTime(),
+            "detourMinutes" to store.detourMinutes,
+        ),
+    )
 }
