@@ -1,0 +1,17 @@
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# app
+app/.gradle/
+app/.kotlin/
+app/build/
+app/local.properties
+*.keystore
+*.jks
+
+# server
+server/node_modules/
+server/dist/
+server/.env
