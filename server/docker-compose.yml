@@ -1,0 +1,28 @@
+# 로컬 개발용 MySQL. 호스트의 3306(로컬 MySQL)·3307(다른 프로젝트)과 겹치지 않게 3308을 쓴다
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: pitcrew-mysql
+    restart: unless-stopped
+    ports:
+      - "3308:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-pitcrew-root}
+      MYSQL_DATABASE: pitcrew
+      MYSQL_USER: pitcrew
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pitcrew}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - pitcrew-mysql:/var/lib/mysql
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-pitcrew-root}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pitcrew-mysql:
