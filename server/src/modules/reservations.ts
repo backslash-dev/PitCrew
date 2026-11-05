@@ -15,6 +15,14 @@ const ReservationBody = z.object({
 const RescheduleBody = z.object({ reservedAt: instantSchema });
 const Params = z.object({ id: idSchema });
 
+interface ChangeRow extends RowDataPacket {
+  id: string;
+  reservation_id: string;
+  previous_at: Date;
+  requested_at: Date;
+  status: string;
+}
+
 interface ReservationRow extends RowDataPacket {
   id: string;
   place_name: string;
@@ -102,14 +110,58 @@ export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gat
         to: reservedAt,
         partySize: current.party_size,
       });
+      const changeId = randomUUID();
       await connection.execute(
         'INSERT INTO reservation_changes (id, reservation_id, previous_at, requested_at, status, provider) VALUES (?, ?, ?, ?, ?, ?)',
-        [randomUUID(), id, current.reserved_at, reservedAt, result.accepted ? 'ACCEPTED' : 'REJECTED', gateways.restaurants.provider],
+        [changeId, id, current.reserved_at, reservedAt, result.accepted ? 'ACCEPTED' : 'REJECTED', gateways.restaurants.provider],
       );
       if (result.accepted) await connection.execute('UPDATE reservations SET reserved_at = ? WHERE id = ?', [reservedAt, id]);
       await connection.commit();
       if (!result.accepted) throw new HttpError(409, 'RESCHEDULE_REJECTED', result.reason);
-      return await findReservation(db, id);
+      return { ...(await findReservation(db, id)), changeId };
+    } catch (error) {
+      await connection.rollback().catch(() => {});
+      throw error;
+    } finally {
+      connection.release();
+    }
+  });
+
+  /**
+   * 받아들여진 변경을 무르고 원래 시각으로 되돌린다. 그 뒤로 예약이 다시 바뀌었으면 엉뚱한 시각으로 돌아가지 않게 거절한다.
+   */
+  app.post('/reservation-changes/:id/revert', async (request) => {
+    const { id } = Params.parse(request.params);
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [changes] = await connection.execute<ChangeRow[]>(
+        'SELECT id, reservation_id, previous_at, requested_at, status FROM reservation_changes WHERE id = ? FOR UPDATE',
+        [id],
+      );
+      const change = changes[0];
+      if (!change) throw notFound('예약 변경');
+      if (change.status !== 'ACCEPTED') throw new HttpError(409, 'NOT_REVERTIBLE', '되돌릴 수 있는 변경이 아닙니다');
+      const [rows] = await connection.execute<ReservationRow[]>(
+        'SELECT id, place_name, reserved_at, party_size FROM reservations WHERE id = ? FOR UPDATE',
+        [change.reservation_id],
+      );
+      const current = rows[0];
+      if (!current) throw notFound('예약');
+      if (current.reserved_at.getTime() !== change.requested_at.getTime()) {
+        throw new HttpError(409, 'CHANGED_SINCE', '그 뒤로 예약이 다시 바뀌어 되돌릴 수 없습니다');
+      }
+      const result = await gateways.restaurants.revertReschedule({
+        placeName: current.place_name,
+        current: current.reserved_at,
+        restoreTo: change.previous_at,
+        partySize: current.party_size,
+      });
+      if (!result.accepted) throw new HttpError(409, 'REVERT_REJECTED', result.reason);
+      await connection.execute("UPDATE reservation_changes SET status = 'REVERTED', reverted_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [id]);
+      await connection.execute('UPDATE reservations SET reserved_at = ? WHERE id = ?', [change.previous_at, current.id]);
+      await connection.commit();
+      return await findReservation(db, current.id);
     } catch (error) {
       await connection.rollback().catch(() => {});
       throw error;

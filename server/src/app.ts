@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { Config } from './config.js';
 import { registerAuth } from './http/auth.js';
 import { registerErrorHandler } from './http/errors.js';
+import { chargingRoutes } from './modules/charging.js';
 import { contactRoutes } from './modules/contacts.js';
 import type { Deps } from './modules/deps.js';
 import { notificationRoutes } from './modules/notifications.js';
@@ -22,6 +23,7 @@ export function buildApp(config: Pick<Config, 'LOG_LEVEL' | 'API_TOKEN'>, deps: 
       await v1.register(storeRoutes, deps);
       await v1.register(orderRoutes, deps);
       await v1.register(notificationRoutes, deps);
+      await v1.register(chargingRoutes, deps);
     },
     { prefix: '/v1' },
   );

@@ -7,7 +7,7 @@ import { createPool } from '../src/db/pool.js';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'mysql://pitcrew:pitcrew@127.0.0.1:3308/pitcrew_test';
 
-const DATA_TABLES = ['notifications', 'orders', 'reservation_changes', 'reservation_companions', 'reservations', 'contacts'];
+const DATA_TABLES = ['waitlists', 'notifications', 'orders', 'reservation_changes', 'reservation_companions', 'reservations', 'contacts'];
 
 export interface TestContext {
   app: FastifyInstance;

@@ -32,7 +32,22 @@ try {
       await db.execute('INSERT INTO reservation_companions (reservation_id, contact_id) VALUES (?, ?)', [id, contactId]);
     }
   }
-  console.log(`seeded ${contacts.length} contacts, ${reservations.length} reservations (dinner at ${dinner.toISOString()})`);
+  // 최근 사흘 같은 시간대에 같은 메뉴를 픽업한 이력. 앱이 '오늘도 주문할까요?'를 제안하는 근거가 된다
+  const routineOrders = [1, 2, 3].map((daysAgo, index) => [
+    `3c7e9a1b-5d2f-4b8e-a6c4-0f1e2d3c4b0${index + 1}`,
+    new Date(Date.now() - daysAgo * 86_400_000 + 10 * 60_000),
+  ] as const);
+  for (const [id, pickupAt] of routineOrders) {
+    const placedAt = new Date(pickupAt.getTime() - 15 * 60_000);
+    await db.execute(
+      `INSERT INTO orders (id, store_id, item, pickup_at, status, provider, created_at) VALUES (?, 's-semo-yeoksam', '아메리카노', ?, 'ACCEPTED', 'mock', ?)
+       ON DUPLICATE KEY UPDATE pickup_at = VALUES(pickup_at), created_at = VALUES(created_at), status = 'ACCEPTED'`,
+      [id, pickupAt, placedAt],
+    );
+  }
+  console.log(
+    `seeded ${contacts.length} contacts, ${reservations.length} reservations (dinner at ${dinner.toISOString()}), ${routineOrders.length} routine orders`,
+  );
 } finally {
   await db.end();
 }

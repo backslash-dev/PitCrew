@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { mockGateways } from '../src/adapters/gateways.js';
 import { closeTestContext, createTestContext, resetData, type TestContext } from './helpers.js';
 
 let ctx: TestContext;
@@ -98,6 +99,29 @@ describe('예약', () => {
     const [rows] = await ctx.db.query('SELECT status FROM reservation_changes WHERE reservation_id = ?', [id]);
     expect(rows).toEqual([{ status: 'REJECTED' }]);
   });
+  it('받아들여진 변경을 되돌리면 원래 시각으로 돌아가고 두 번은 못 되돌린다', async () => {
+    const id = randomUUID();
+    await put(`/v1/reservations/${id}`, { placeName: '온담 한식당', reservedAt: '2026-11-05T10:00:00Z', partySize: 2 });
+    const { changeId } = (await post(`/v1/reservations/${id}/reschedule`, { reservedAt: '2026-11-05T10:30:00Z' })).json();
+    expect(changeId).toEqual(expect.any(String));
+    const reverted = await post(`/v1/reservation-changes/${changeId}/revert`, {});
+    expect(reverted.statusCode).toBe(200);
+    expect(reverted.json().reservedAt).toBe('2026-11-05T10:00:00.000Z');
+    const [rows] = await ctx.db.query('SELECT status FROM reservation_changes WHERE id = ?', [changeId]);
+    expect(rows).toEqual([{ status: 'REVERTED' }]);
+    expect((await post(`/v1/reservation-changes/${changeId}/revert`, {})).json().error.code).toBe('NOT_REVERTIBLE');
+  });
+
+  it('그 뒤로 예약이 또 바뀌었으면 앞선 변경은 되돌리지 않는다', async () => {
+    const id = randomUUID();
+    await put(`/v1/reservations/${id}`, { placeName: 'x', reservedAt: '2026-11-05T10:00:00Z', partySize: 2 });
+    const first = (await post(`/v1/reservations/${id}/reschedule`, { reservedAt: '2026-11-05T10:30:00Z' })).json().changeId;
+    await post(`/v1/reservations/${id}/reschedule`, { reservedAt: '2026-11-05T10:50:00Z' });
+    const res = await post(`/v1/reservation-changes/${first}/revert`, {});
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('CHANGED_SINCE');
+    expect((await get('/v1/reservations')).json().reservations[0].reservedAt).toBe('2026-11-05T10:50:00.000Z');
+  });
 });
 
 describe('매장·주문', () => {
@@ -123,6 +147,39 @@ describe('매장·주문', () => {
   it('없는 매장은 404', async () => {
     expect((await post('/v1/orders', { storeId: 'nope', item: 'x', pickupAt: new Date().toISOString() })).statusCode).toBe(404);
   });
+  it('주문 이력은 최근 픽업 순이고 매장 이름을 함께 준다', async () => {
+    const soon = new Date(Date.now() + 20 * 60_000).toISOString();
+    const later = new Date(Date.now() + 40 * 60_000).toISOString();
+    await post('/v1/orders', { storeId: 's-semo-yeoksam', item: '아메리카노', pickupAt: soon });
+    await post('/v1/orders', { storeId: 's-hansot-gangnam', item: '도시락', pickupAt: later });
+    const orders = (await get('/v1/orders')).json().orders;
+    expect(orders.map((o: { item: string }) => o.item)).toEqual(['도시락', '아메리카노']);
+    expect(orders[1]).toMatchObject({ storeId: 's-semo-yeoksam', storeName: '세모 커피 역삼점', status: 'ACCEPTED' });
+  });
+
+  it('조리 전 주문은 취소하고 같은 주문을 다시 취소하면 409', async () => {
+    const pickupAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const { id } = (await post('/v1/orders', { storeId: 's-semo-yeoksam', item: '아메리카노', pickupAt })).json();
+    const res = await post(`/v1/orders/${id}/cancel`, {});
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe('CANCELLED');
+    expect((await post(`/v1/orders/${id}/cancel`, {})).json().error.code).toBe('NOT_CANCELLABLE');
+  });
+
+  it('매장이 조리를 시작한 뒤에는 취소를 거절한다', async () => {
+    let clock = Date.now();
+    const late = await createTestContext({ gateways: mockGateways(() => new Date(clock)) });
+    try {
+      const pickupAt = new Date(clock + 30 * 60_000).toISOString();
+      const { id } = (await late.app.inject({ method: 'POST', url: '/v1/orders', payload: { storeId: 's-semo-yeoksam', item: '라테', pickupAt } })).json();
+      clock += 6 * 60_000;
+      const res = await late.app.inject({ method: 'POST', url: `/v1/orders/${id}/cancel`, payload: {} });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().error.code).toBe('CANCEL_REJECTED');
+    } finally {
+      await closeTestContext(late);
+    }
+  });
 });
 
 describe('알림', () => {
@@ -141,6 +198,28 @@ describe('알림', () => {
     const minsu = await contact();
     expect((await post('/v1/notifications', { message: 'x', contactIds: [minsu, randomUUID()] })).statusCode).toBe(400);
     expect((await get('/v1/notifications')).json().notifications).toEqual([]);
+  });
+});
+
+describe('충전·줄서기', () => {
+  it('충전소는 우회가 짧은 순서이고 걸어갈 수 있는 식당을 함께 준다', async () => {
+    const chargers = (await get('/v1/chargers')).json().chargers;
+    expect(chargers.map((c: { id: string }) => c.id)).toEqual(['ch-ieum-yangjae', 'ch-green-seocho']);
+    expect(chargers[0]).toMatchObject({ powerKw: 350, latitude: 37.4846 });
+    expect(chargers[0].restaurants.map((r: { id: string }) => r.id)).toEqual(['cr-sobok-yangjae', 'cr-mulgyeol-yangjae']);
+  });
+
+  it('줄서기를 등록하면 앞 팀 수와 대기 시간을 돌려주고 취소할 수 있다', async () => {
+    const res = await post('/v1/waitlists', { restaurantId: 'cr-sobok-yangjae', partySize: 2 });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ restaurantId: 'cr-sobok-yangjae', partySize: 2, position: 3, waitMinutes: 15, status: 'WAITING' });
+    const cancelled = await post(`/v1/waitlists/${res.json().id}/cancel`, {});
+    expect(cancelled.json().status).toBe('CANCELLED');
+    expect((await post(`/v1/waitlists/${res.json().id}/cancel`, {})).statusCode).toBe(409);
+  });
+
+  it('없는 식당은 404', async () => {
+    expect((await post('/v1/waitlists', { restaurantId: 'nope', partySize: 2 })).statusCode).toBe(404);
   });
 });
 
