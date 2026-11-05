@@ -7,6 +7,12 @@ import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.errand.LateArrivalPlanner
 import ai.pitcrew.app.platform.Destination
 import ai.pitcrew.app.platform.DrivingState
+import ai.pitcrew.app.platform.InteractionMode
+import ai.pitcrew.app.ui.components.ButtonKind
+import ai.pitcrew.app.ui.components.ButtonSize
+import ai.pitcrew.app.ui.components.PcButton
+import ai.pitcrew.app.ui.voice.VoiceCommandPanel
+import ai.pitcrew.app.ui.voice.VoiceCommandState
 import ai.pitcrew.app.ui.components.Hairline
 import ai.pitcrew.app.ui.components.ListRow
 import ai.pitcrew.app.ui.components.PcCard
@@ -36,6 +42,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -50,6 +57,7 @@ data class HomeState(
     val reservations: List<Reservation>,
     val contacts: List<Contact>,
     val now: LocalDateTime,
+    val voice: VoiceCommandState,
 )
 
 class HomeActions(
@@ -59,6 +67,9 @@ class HomeActions(
     val openReservation: (String) -> Unit,
     val openReservations: () -> Unit,
     val openHistory: () -> Unit,
+    val startVoice: () -> Unit,
+    val cancelVoice: () -> Unit,
+    val dismissVoice: () -> Unit,
 )
 
 @Composable
@@ -69,8 +80,18 @@ fun HomeScreen(state: HomeState, actions: HomeActions, width: WindowWidth) {
 
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
         Row(Modifier.fillMaxWidth().height(100.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("오늘의 이동", style = PcTheme.type.titleLarge, color = PcTheme.colors.textPrimary)
+            Text("오늘의 이동", style = PcTheme.type.titleLarge, color = PcTheme.colors.textPrimary, modifier = Modifier.weight(1f))
+            // 앱 음성 입력은 주차 중 화면에서만 연다. 주행 중에는 Gleo로 말한다
+            if (state.driving.interactionMode == InteractionMode.TOUCH && state.voice == VoiceCommandState.Idle) {
+                PcButton("말로 시키기", actions.startVoice, kind = ButtonKind.BASIC, size = ButtonSize.MEDIUM, icon = Icons.Rounded.Mic)
+            }
         }
+        VoiceCommandPanel(
+            state.voice,
+            onCancel = actions.cancelVoice,
+            onDismiss = actions.dismissVoice,
+            modifier = Modifier.padding(bottom = if (state.voice == VoiceCommandState.Idle) 0.dp else PcSpacing.l),
+        )
         when (width) {
             WindowWidth.EXPANDED -> Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
                 trip(Modifier.weight(0.9f))

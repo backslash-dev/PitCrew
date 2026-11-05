@@ -11,10 +11,15 @@ import ai.pitcrew.app.data.mock.MockErrandService
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.data.mock.SampleData
 import ai.pitcrew.app.errand.LateArrivalHandler
+import ai.pitcrew.app.errand.LateArrivalUseCase
 import ai.pitcrew.app.errand.PickupOnRouteHandler
+import ai.pitcrew.app.errand.PickupUseCase
+import ai.pitcrew.app.errand.RuleBasedInterpreter
 import ai.pitcrew.app.gleo.GleoActionDispatcher
 import ai.pitcrew.app.gleo.GleoFunction
 import ai.pitcrew.app.platform.PlatformServices
+import ai.pitcrew.app.ui.voice.VoiceAnnouncer
+import ai.pitcrew.app.ui.voice.VoiceCommandController
 import android.app.Application
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,12 +39,28 @@ class PitCrewApplication : Application() {
         MockErrandService(addWaypoint = { store -> platform.navigation.addWaypoint(store.displayName, store.latitude, store.longitude) })
     }
 
+    val lateArrival: LateArrivalUseCase by lazy {
+        LateArrivalUseCase(platform.navigation::fetchDestination, errands, reservations, contacts)
+    }
+    val pickup: PickupUseCase by lazy { PickupUseCase(platform.navigation::fetchDestination, stores, errands) }
+
+    val voiceCommands: VoiceCommandController by lazy {
+        VoiceCommandController(
+            speech = platform.voiceInput,
+            interpreter = RuleBasedInterpreter { stores.candidatesOnRoute().map { it.displayName } },
+            lateArrival = lateArrival,
+            pickup = pickup,
+            scope = scope,
+        )
+    }
+
+    val announcer: VoiceAnnouncer by lazy { VoiceAnnouncer(errands, platform.navigation, platform.voiceOutput, scope) }
+
     val gleo: GleoActionDispatcher by lazy {
-        val fetchDestination = platform.navigation::fetchDestination
         GleoActionDispatcher(
             mapOf(
-                GleoFunction.NOTIFY_LATE_ARRIVAL to LateArrivalHandler(fetchDestination, errands, reservations, contacts),
-                GleoFunction.ORDER_PICKUP_ON_ROUTE to PickupOnRouteHandler(fetchDestination, stores, errands),
+                GleoFunction.NOTIFY_LATE_ARRIVAL to LateArrivalHandler(lateArrival),
+                GleoFunction.ORDER_PICKUP_ON_ROUTE to PickupOnRouteHandler(pickup),
             ),
         )
     }

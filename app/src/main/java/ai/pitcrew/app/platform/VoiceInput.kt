@@ -13,17 +13,24 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class SpeechResult(val text: String, val isFinal: Boolean)
 
-class VoiceInput(context: Context) : AutoCloseable {
+interface SpeechSource {
+    val listening: StateFlow<Boolean>
+    val result: StateFlow<SpeechResult?>
+    fun listen(): Boolean
+    fun stop()
+}
+
+class VoiceInput(context: Context) : SpeechSource, AutoCloseable {
     private val stt = SpeechToText(context, Mode.ON_DEVICE)
 
     private val _status = MutableStateFlow<SdkStatus>(SdkStatus.Connecting)
     val status: StateFlow<SdkStatus> = _status.asStateFlow()
 
     private val _listening = MutableStateFlow(false)
-    val listening: StateFlow<Boolean> = _listening.asStateFlow()
+    override val listening: StateFlow<Boolean> = _listening.asStateFlow()
 
     private val _result = MutableStateFlow<SpeechResult?>(null)
-    val result: StateFlow<SpeechResult?> = _result.asStateFlow()
+    override val result: StateFlow<SpeechResult?> = _result.asStateFlow()
 
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
@@ -62,7 +69,7 @@ class VoiceInput(context: Context) : AutoCloseable {
     }
 
     // onStartedRecognition은 말소리가 감지돼야 오므로 요청 시점부터 듣는 중으로 본다
-    fun listen(): Boolean {
+    override fun listen(): Boolean {
         if (_status.value != SdkStatus.Ready || _listening.value) return false
         beginRecognition()
         return runCatching { stt.request() }.onFailure(::abortRecognition).isSuccess
@@ -78,7 +85,7 @@ class VoiceInput(context: Context) : AutoCloseable {
         }.onFailure(::abortRecognition).isSuccess
     }
 
-    fun stop() {
+    override fun stop() {
         runCatching { stt.stop() }
         _listening.value = false
     }
