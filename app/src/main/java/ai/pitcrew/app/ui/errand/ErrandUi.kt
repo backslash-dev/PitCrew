@@ -77,8 +77,10 @@ fun Errand.outcomeLine(): String? = when (state) {
         }
         is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업으로 주문하고 경유지에 추가했어요"
     }
-    ErrandState.FAILED -> steps.firstOrNull { it.state == StepState.FAILED }
-        ?.let { "${it.title.substringBefore(" · ")}에 실패했어요" } ?: "처리하지 못했어요"
+    ErrandState.FAILED -> {
+        val step = steps.firstOrNull { it.state == StepState.FAILED }?.let { "${it.title.substringBefore(" · ")}에 실패했어요" } ?: "처리하지 못했어요"
+        failureReason?.let { "$step · $it" } ?: step
+    }
     ErrandState.DECLINED -> "거절해서 진행하지 않았어요"
     else -> null
 }

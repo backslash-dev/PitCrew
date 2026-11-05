@@ -9,6 +9,11 @@ import ai.pitcrew.app.ui.components.ListRow
 import ai.pitcrew.app.ui.components.PcButton
 import ai.pitcrew.app.ui.components.ScreenHeader
 import ai.pitcrew.app.ui.components.SegmentedTabs
+import ai.pitcrew.app.ui.components.TextAction
+import ai.pitcrew.app.ui.theme.PcTheme
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import ai.pitcrew.app.ui.theme.PcSpacing
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -34,6 +39,8 @@ import androidx.compose.ui.Modifier
 fun ReservationsScreen(
     reservations: List<Reservation>,
     contacts: List<Contact>,
+    syncError: String?,
+    onRetry: () -> Unit,
     onOpenReservation: (String) -> Unit,
     onNewReservation: () -> Unit,
     onOpenContact: (String) -> Unit,
@@ -51,6 +58,12 @@ fun ReservationsScreen(
             )
         })
         SegmentedTabs(listOf("예약", "일행"), tab, { tab = it })
+        if (syncError != null) {
+            Row(Modifier.padding(top = PcSpacing.m), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PcSpacing.m)) {
+                Text(syncError, style = PcTheme.type.body, color = PcTheme.colors.negative, modifier = Modifier.weight(1f, fill = false))
+                TextAction("다시 시도", onRetry)
+            }
+        }
         Spacer(Modifier.height(PcSpacing.l))
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(PcSpacing.s)) {
             if (tab == 0) {

@@ -1,13 +1,12 @@
-package ai.pitcrew.app.data.mock
+package ai.pitcrew.app.data
 
-import ai.pitcrew.app.data.ErrandService
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.ErrandStep
-import ai.pitcrew.app.domain.Store
 import ai.pitcrew.app.domain.StepState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,14 +18,24 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
+sealed interface StepResult {
+    data object Done : StepResult
+    data class Failed(val reason: String?) : StepResult
+}
+
+/** 승인 이후 단계 하나를 실제로 수행한다. [stepIndex]는 승인 단계를 0으로 센 순서다. */
+fun interface StepExecutor {
+    suspend fun execute(errand: Errand, stepIndex: Int): StepResult
+}
+
 /**
- * 예약 변경·알림 발송·주문을 서버 대신 흉내 낸다. 경유지 추가만 실제 내비 SDK를 호출한다.
- * 단계 지연은 화면에서 진행이 보이도록 둔 값이며 Gleo 응답 예산(5초) 안에 끝나야 한다.
+ * 작업의 상태 흐름(제안 → 승인 → 단계 진행 → 완료·실패)을 관리한다. 각 단계의 실제 처리는 [executor]가 맡는다.
+ * 단계 사이 지연은 화면에서 진행이 보이게 하는 값이며, 전체가 Gleo 응답 예산(5초) 안에 끝나야 한다.
  */
-class MockErrandService(
-    private val addWaypoint: suspend (Store) -> Boolean,
+class ErrandRunner(
+    private val executor: StepExecutor,
     private val now: () -> LocalDateTime = LocalDateTime::now,
-    private val stepDelayMillis: Long = 600,
+    private val stepDelayMillis: Long = 0,
 ) : ErrandService {
     private val _errands = MutableStateFlow<List<Errand>>(emptyList())
     override val errands: StateFlow<List<Errand>> = _errands.asStateFlow()
@@ -65,14 +74,15 @@ class MockErrandService(
         }
         val errand = find(id)!!
         for (stepIndex in 1 until errand.steps.size) {
-            delay(stepDelayMillis)
-            val ok = runStep(errand.detail, stepIndex)
-            if (!ok) {
+            if (stepDelayMillis > 0) delay(stepDelayMillis)
+            val result = runCatching { executor.execute(errand, stepIndex) }
+                .getOrElse { e -> if (e is CancellationException) throw e else StepResult.Failed(e.message) }
+            if (result is StepResult.Failed) {
                 update(id) { e ->
                     e.copy(
                         state = ErrandState.FAILED,
                         finishedAt = now(),
-                        failureReason = "${e.steps[stepIndex].title} 실패",
+                        failureReason = result.reason,
                         steps = e.steps.mapIndexed { i, s -> if (i == stepIndex) s.copy(state = StepState.FAILED, at = now()) else s },
                     )
                 }
@@ -102,11 +112,6 @@ class MockErrandService(
     }
 
     override fun markArrivalAnnounced(id: String) = update(id) { it.copy(arrivalAnnouncedAt = now()) }
-
-    private suspend fun runStep(detail: ErrandDetail, stepIndex: Int): Boolean = when (detail) {
-        is ErrandDetail.Pickup -> if (stepIndex == plannedSteps(detail).size) addWaypoint(detail.store) else true
-        is ErrandDetail.LateArrival -> true
-    }
 
     private fun find(id: String) = _errands.value.firstOrNull { it.id == id }
 

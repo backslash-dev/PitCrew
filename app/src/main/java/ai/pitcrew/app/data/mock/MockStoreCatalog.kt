@@ -5,13 +5,13 @@ import ai.pitcrew.app.domain.Store
 
 /** 경로상 매장 검색의 목업. 서버 단계에서 실제 POI 검색으로 교체한다. */
 class MockStoreCatalog(private val stores: List<Store> = DEFAULT_STORES) : StoreCatalog {
-    override fun findOnRoute(storeName: String?): Store? {
+    override suspend fun findOnRoute(storeName: String?): Store? {
         val query = storeName?.replace(" ", "")?.takeIf { it.isNotBlank() }
         val candidates = if (query == null) stores else stores.filter { it.displayName.replace(" ", "").contains(query) }
         return candidates.minByOrNull { it.detourMinutes }
     }
 
-    override fun candidatesOnRoute(): List<Store> = stores.sortedBy { it.detourMinutes }
+    override suspend fun candidatesOnRoute(): List<Store> = stores.sortedBy { it.detourMinutes }
 
     companion object {
         val DEFAULT_STORES = listOf(

@@ -53,7 +53,7 @@ class PickupUseCase(
     /** 승인 전 제안의 매장을 바꾼다. 픽업 시각은 새 매장 기준으로 다시 계산한다. */
     suspend fun switchStore(item: String, store: Store): PickupOutcome = order(item, store, confirmed = false, channel = ApprovalChannel.TOUCH)
 
-    fun candidates(): List<Store> = stores.candidatesOnRoute()
+    suspend fun candidates(): List<Store> = stores.candidatesOnRoute()
 
     private suspend fun order(item: String, store: Store, confirmed: Boolean, channel: ApprovalChannel): PickupOutcome {
         val destination = try {

@@ -80,6 +80,7 @@ class VoiceCommandController(
                 LateArrivalOutcome.NoRoute -> done("내비게이션에서 목적지를 먼저 정해 주세요.")
                 LateArrivalOutcome.NavigationUnavailable -> done("내비게이션에 연결하지 못했어요.")
                 is LateArrivalOutcome.OnTime -> done("제때 도착해요. 예약을 바꿀 필요가 없어요.")
+                is LateArrivalOutcome.NoReservation -> done("${outcome.plan.delayMinutes}분 늦지만 그 시각에 등록된 예약이 없어요. 예약 탭에서 먼저 등록해 주세요.")
                 is LateArrivalOutcome.AwaitingApproval -> done("${outcome.plan.delayMinutes}분 늦어요. 아래 카드에서 확인하고 승인해 주세요.", needsApproval = true)
                 is LateArrivalOutcome.Finished -> done("처리했어요.")
             }

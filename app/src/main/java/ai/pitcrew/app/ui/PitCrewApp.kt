@@ -150,10 +150,13 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
                 composable(Routes.ERRAND, arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
                     val id = entry.arguments?.getString("id")
                     val errand = errands.firstOrNull { it.id == id }
-                    val storeOptions = remember(errand?.id, destination, now) {
-                        val remain = destination?.remainTimeSeconds ?: return@remember emptyList()
-                        if (errand?.detail !is ErrandDetail.Pickup) return@remember emptyList()
-                        app.pickup.candidates().map { StoreOption(it, PickupPlanner.readyAt(it, now, remain)) }
+                    val storeOptions by produceState(emptyList<StoreOption>(), errand?.id, destination?.remainTimeSeconds, now) {
+                        val remain = destination?.remainTimeSeconds
+                        value = if (remain == null || errand?.detail !is ErrandDetail.Pickup) {
+                            emptyList()
+                        } else {
+                            runCatching { app.pickup.candidates() }.getOrDefault(emptyList()).map { StoreOption(it, PickupPlanner.readyAt(it, now, remain)) }
+                        }
                     }
                     ErrandDetailScreen(
                         errand = errand,
@@ -176,8 +179,12 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
                     )
                 }
                 composable(Routes.RESERVATIONS) {
+                    val syncError by app.reservations.error.collectAsStateWithLifecycle()
+                    val contactError by app.contacts.error.collectAsStateWithLifecycle()
                     ReservationsScreen(
                         reservations, contacts,
+                        syncError = syncError ?: contactError,
+                        onRetry = { app.reservations.refresh(); app.contacts.refresh() },
                         onOpenReservation = { nav.navigate(Routes.reservation(it)) },
                         onNewReservation = { nav.navigate(Routes.reservation(null)) },
                         onOpenContact = { nav.navigate(Routes.contact(it)) },

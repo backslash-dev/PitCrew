@@ -14,6 +14,9 @@ import java.time.temporal.ChronoUnit
 class InMemoryContactRepository(seed: List<Contact> = SampleData.contacts) : ContactRepository {
     private val _contacts = MutableStateFlow(seed)
     override val contacts: StateFlow<List<Contact>> = _contacts.asStateFlow()
+    override val error: StateFlow<String?> = MutableStateFlow(null)
+    override fun refresh() = Unit
+    override suspend fun ensureLoaded() = Unit
 
     override fun upsert(contact: Contact) = _contacts.update { list ->
         (list.filterNot { it.id == contact.id } + contact).sortedBy { it.name }
@@ -25,6 +28,9 @@ class InMemoryContactRepository(seed: List<Contact> = SampleData.contacts) : Con
 class InMemoryReservationRepository(seed: List<Reservation>) : ReservationRepository {
     private val _reservations = MutableStateFlow(seed.sortedBy { it.time })
     override val reservations: StateFlow<List<Reservation>> = _reservations.asStateFlow()
+    override val error: StateFlow<String?> = MutableStateFlow(null)
+    override fun refresh() = Unit
+    override suspend fun ensureLoaded() = Unit
 
     override fun upsert(reservation: Reservation) = _reservations.update { list ->
         (list.filterNot { it.id == reservation.id } + reservation).sortedBy { it.time }

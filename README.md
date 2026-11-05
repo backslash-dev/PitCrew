@@ -5,7 +5,7 @@
 | 경로 | 내용 |
 | --- | --- |
 | `app/` | Pleos Connect(AAOS, Android 14) 앱. Kotlin · Jetpack Compose |
-| `server/` | 의도 파악·서비스 연동 서버. Node · TypeScript · Fastify |
+| `server/` | 일행·예약·매장·주문·알림 API. Node · TypeScript · Fastify · MySQL |
 | `scripts/` | 에뮬레이터 실행, Virtual Console(차량 상태 주입) 보조 스크립트 |
 
 ## 요구 사항
@@ -18,10 +18,12 @@
 ```bash
 scripts/emulator.sh start          # 헤드리스 부팅, 창이 필요하면 --window
 cd app && ./gradlew installDebug   # 런처에서 PitCrew 실행
-cd server && pnpm install && pnpm dev
+cd server && pnpm install && pnpm db:up && pnpm seed && pnpm dev
 ```
 
-서버는 기본 `127.0.0.1:3000`에서 뜨고, 에뮬레이터 안에서는 `http://10.0.2.2:3000`으로 접근한다.
+- 서버는 기본 `127.0.0.1:3000`에서 뜨고, debug 앱은 에뮬레이터 안에서 `http://10.0.2.2:3000`으로 붙는다. 서버 주소를 비우면(`-Ppitcrew.serverUrl=`) 앱 안 목업으로 동작한다.
+- DB는 Docker의 MySQL 8.4(호스트 3308)다. 서버가 뜰 때 `migrations/`를 순서대로 적용하고, `pnpm seed`는 지금 시각 기준의 시연용 일행·예약을 넣는다.
+- 운영 배포 시 `DATABASE_URL`, `API_TOKEN`(16자 이상, 필수)을 환경변수로 준다. 앱은 `-Ppitcrew.serverUrl=… -Ppitcrew.apiToken=…`로 빌드한다.
 
 차량 상태는 Virtual Console로 바꾼다.
 
@@ -70,7 +72,7 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 
 - 지각 대응, 경로상 픽업: Gleo 음성 또는 주차 중 앱의 "말로 시키기"(STT)로 요청하고, 주행 중에는 음성, 주차 중에는 화면 탭으로 승인한다.
 - 픽업 매장은 후보 중에서 바꿀 수 있고, 매장 3분·800m 이내에 다가가면 TTS로 안내한다.
-- 예약 변경·알림 발송·주문·매장 검색은 서버 전까지 앱 안 목업(`data/mock`)이 처리한다. 경유지 추가만 실제 내비를 호출한다.
+- 예약 변경·알림 발송·주문·매장 조회는 서버가 처리한다. 식당·매장·문자 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청 이력은 DB에 남는다.
 - 주행 중에는 조작 요소 없는 주행 화면으로 바뀐다(MainActivity에 DO 선언).
 
 ## 에뮬레이터 주의 사항

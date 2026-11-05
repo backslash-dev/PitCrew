@@ -19,8 +19,9 @@ fun interface CommandInterpreter {
  * 서버 전 임시 해석기. 지각("N시 … 늦")과 픽업("메뉴 … 주문/픽업")만 규칙으로 알아듣는다.
  * 시각은 숫자와 한글 수사(한~열두)를 모두 받고, 오후·저녁·밤이면 12시간을 더한다.
  */
-class RuleBasedInterpreter(private val storeNames: () -> List<String>) : CommandInterpreter {
-    override suspend fun interpret(text: String): VoiceCommand = parse(text, storeNames())
+class RuleBasedInterpreter(private val storeNames: suspend () -> List<String>) : CommandInterpreter {
+    override suspend fun interpret(text: String): VoiceCommand =
+        parse(text, runCatching { storeNames() }.getOrDefault(emptyList()))
 
     companion object {
         private val NATIVE_HOURS = listOf(

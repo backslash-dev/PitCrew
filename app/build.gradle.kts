@@ -16,9 +16,15 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("String", "SERVER_URL", "\"${providers.gradleProperty("pitcrew.serverUrl").getOrElse("")}\"")
+        buildConfigField("String", "API_TOKEN", "\"${providers.gradleProperty("pitcrew.apiToken").getOrElse("")}\"")
     }
 
     buildTypes {
+        debug {
+            // 에뮬레이터에서 호스트의 로컬 서버로 붙는다. 비워 두면 앱 안 목업으로 동작한다
+            buildConfigField("String", "SERVER_URL", "\"${providers.gradleProperty("pitcrew.serverUrl").getOrElse("http://10.0.2.2:3000/")}\"")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -56,6 +62,7 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons)
     implementation(libs.androidx.navigation.compose)
+    implementation(libs.okhttp)
     debugImplementation(libs.compose.ui.tooling)
 
     implementation(libs.pleos.vehicle)
@@ -67,4 +74,5 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.json)
+    testImplementation(libs.okhttp.mockwebserver)
 }

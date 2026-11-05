@@ -2,9 +2,11 @@ package ai.pitcrew.app.ui.voice
 
 import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
-import ai.pitcrew.app.data.mock.MockErrandService
+import ai.pitcrew.app.data.ErrandRunner
+import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.errand.LateArrivalUseCase
 import ai.pitcrew.app.errand.PickupUseCase
 import ai.pitcrew.app.errand.RuleBasedInterpreter
@@ -34,13 +36,18 @@ class VoiceCommandControllerTest {
 
     private val now = LocalDateTime.of(2026, 11, 5, 18, 40)
     private val route = Destination("강남역", 45 * 60, 13_000)
-    private val errands = MockErrandService(addWaypoint = { true }, now = { now }, stepDelayMillis = 0)
+    private val errands = ErrandRunner(MockStepExecutor { true }, now = { now }, stepDelayMillis = 0)
     private val speech = FakeSpeech()
 
     private fun controller(scope: CoroutineScope) = VoiceCommandController(
         speech = speech,
         interpreter = RuleBasedInterpreter { emptyList() },
-        lateArrival = LateArrivalUseCase({ route }, errands, InMemoryReservationRepository(emptyList()), InMemoryContactRepository()) { now },
+        lateArrival = LateArrivalUseCase(
+            { route },
+            errands,
+            InMemoryReservationRepository(listOf(Reservation("r1", "온담 한식당", LocalDateTime.of(2026, 11, 5, 19, 0), 2, emptyList()))),
+            InMemoryContactRepository(),
+        ) { now },
         pickup = PickupUseCase({ route }, MockStoreCatalog(), errands) { now },
         scope = scope,
         listenTimeoutMillis = 5_000,

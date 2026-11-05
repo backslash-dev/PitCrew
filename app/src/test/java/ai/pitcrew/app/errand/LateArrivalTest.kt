@@ -2,7 +2,8 @@ package ai.pitcrew.app.errand
 
 import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
-import ai.pitcrew.app.data.mock.MockErrandService
+import ai.pitcrew.app.data.ErrandRunner
+import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
@@ -90,7 +91,7 @@ class LateArrivalHandlerTest {
     private val reservations = InMemoryReservationRepository(
         listOf(Reservation("r1", "온담 한식당", LocalDateTime.of(2026, 11, 5, 19, 0), 3, listOf("c-minsu", "c-seoyeon"))),
     )
-    private val errands = MockErrandService(addWaypoint = { true }, now = { now }, stepDelayMillis = 0)
+    private val errands = ErrandRunner(MockStepExecutor { true }, now = { now }, stepDelayMillis = 0)
 
     private fun handler(destination: suspend () -> Destination?) =
         LateArrivalHandler(LateArrivalUseCase(destination, errands, reservations, contacts) { now })
@@ -133,6 +134,23 @@ class LateArrivalHandlerTest {
         assertEquals(ErrandState.COMPLETED, done.state)
         assertEquals(ApprovalChannel.VOICE, done.approvedVia)
         assertEquals(LocalTime.of(19, 40), (done.detail as ErrandDetail.LateArrival).proposedTime)
+    }
+
+    @Test
+    fun `늦지만 그 시각 예약이 없으면 바꿀 대상이 없다고 응답한다`() = runTest {
+        val response = handler { route }.handle(request("appointmentTime" to "18:30"))
+        assertEquals(GleoStatus.FAIL, response.status)
+        assertTrue(response.message.startsWith("No reservation around 18:30"))
+        assertTrue(errands.errands.value.isEmpty())
+    }
+
+    @Test
+    fun `승인 시각을 12시간 틀리게 넘겨도 제안 시각 쪽으로 바로잡는다`() = runTest {
+        handler { route }.handle(request("appointmentTime" to "19:00"))
+        handler { route }.handle(request("appointmentTime" to "19:00", "confirmedTime" to "07:30"))
+        assertEquals(LocalTime.of(19, 30), (errands.errands.value.single().detail as ErrandDetail.LateArrival).proposedTime)
+        assertEquals(LocalTime.of(1, 10), closestHalfDay(LocalTime.of(13, 10), LocalTime.of(1, 10)))
+        assertEquals(LocalTime.of(19, 40), closestHalfDay(LocalTime.of(19, 40), LocalTime.of(19, 30)))
     }
 
     @Test

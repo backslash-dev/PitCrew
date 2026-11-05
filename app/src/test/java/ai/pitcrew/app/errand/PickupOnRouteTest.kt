@@ -1,6 +1,7 @@
 package ai.pitcrew.app.errand
 
-import ai.pitcrew.app.data.mock.MockErrandService
+import ai.pitcrew.app.data.ErrandRunner
+import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.gleo.GleoFunction
@@ -18,7 +19,7 @@ class PickupOnRouteTest {
     private val now = LocalDateTime.of(2026, 11, 5, 18, 0)
     private val route = Destination("집", remainTimeSeconds = 30 * 60, remainDistanceMeters = 12_000)
     private var waypointResult = true
-    private val errands = MockErrandService(addWaypoint = { waypointResult }, now = { now }, stepDelayMillis = 0)
+    private val errands = ErrandRunner(MockStepExecutor { waypointResult }, now = { now }, stepDelayMillis = 0)
     private val handler = PickupOnRouteHandler(PickupUseCase({ route }, MockStoreCatalog(), errands) { now })
 
     private fun request(vararg params: Pair<String, Any>) =

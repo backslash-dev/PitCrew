@@ -62,10 +62,23 @@ object LateArrivalPlanner {
     }
 }
 
+/**
+ * Gleo는 승인 시각도 12시간제로 헷갈려 넘긴다(01:10을 13:10으로). 제안한 시각과 12시간 차이 나는 두 후보 중 가까운 쪽으로 본다.
+ */
+internal fun closestHalfDay(time: LocalTime, reference: LocalTime): LocalTime {
+    fun distance(t: LocalTime): Long {
+        val diff = Duration.between(reference, t).abs().toMinutes()
+        return minOf(diff, 24 * 60 - diff)
+    }
+    return listOf(time, time.plusHours(12)).minBy(::distance)
+}
+
 sealed interface LateArrivalOutcome {
     data object NoRoute : LateArrivalOutcome
     data object NavigationUnavailable : LateArrivalOutcome
     data class OnTime(val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
+    /** 늦지만 그 시각에 등록된 예약이 없어 바꿀 대상이 없다. */
+    data class NoReservation(val plan: LateArrivalPlan) : LateArrivalOutcome
     data class AwaitingApproval(val errand: Errand, val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
     data class Finished(val errand: Errand, val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
 }
@@ -86,19 +99,22 @@ class LateArrivalUseCase(
             return LateArrivalOutcome.NavigationUnavailable
         } ?: return LateArrivalOutcome.NoRoute
 
+        reservations.ensureLoaded()
+        contacts.ensureLoaded()
         val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
         val reservation = matchReservation(plan.appointment)
         if (!plan.isLate) return LateArrivalOutcome.OnTime(plan, reservation)
+        if (reservation == null) return LateArrivalOutcome.NoReservation(plan)
 
-        val companions = reservation?.companionIds.orEmpty().mapNotNull { id -> contacts.contacts.value.firstOrNull { it.id == id } }
+        val companions = reservation.companionIds.mapNotNull { id -> contacts.contacts.value.firstOrNull { it.id == id } }
         val errand = errands.propose(
             ErrandDetail.LateArrival(
-                reservationId = reservation?.id,
-                placeName = reservation?.placeName,
+                reservationId = reservation.id,
+                placeName = reservation.placeName,
                 appointment = plan.appointment,
                 estimatedArrival = plan.estimatedArrival,
                 delayMinutes = plan.delayMinutes,
-                proposedTime = approvedTime ?: plan.proposedTime!!,
+                proposedTime = approvedTime?.let { closestHalfDay(it, plan.proposedTime!!) } ?: plan.proposedTime!!,
                 companions = companions,
             ),
         )
@@ -136,6 +152,13 @@ class LateArrivalHandler(private val useCase: LateArrivalUseCase) : GleoActionHa
                 GleoResponse.fail(function, "There is no active navigation route, so the arrival time is unknown.")
             is LateArrivalOutcome.OnTime ->
                 GleoResponse.success(function, "The driver is expected to arrive on time, so no change is needed.", outcome.plan.toData(outcome.reservation))
+            is LateArrivalOutcome.NoReservation ->
+                GleoResponse.fail(
+                    function,
+                    "No reservation around ${outcome.plan.appointment.toLocalTime().toClockTime()} is registered in PitCrew, so there is nothing to change. " +
+                        "The user can register it in the PitCrew app.",
+                    outcome.plan.toData(null),
+                )
             is LateArrivalOutcome.AwaitingApproval -> {
                 val detail = outcome.errand.detail as ErrandDetail.LateArrival
                 GleoResponse.asking(
