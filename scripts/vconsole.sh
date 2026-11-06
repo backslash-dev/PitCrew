@@ -10,6 +10,7 @@ usage: $0 <command>
   park                  P단 정차
   drive <kph>           D단으로 kph 속도 주행
   gear <Park|Drive|Reverse|Neutral>
+  battery <pct>         배터리 잔량(SOC) %
   state                 현재 차량 상태(JSON)
   hold                  콘솔 세션 유지(Ctrl+C로 종료)
 USAGE
@@ -42,6 +43,10 @@ case "${1:-}" in
   gear)
     [[ "${2:-}" =~ ^(Park|Drive|Reverse|Neutral)$ ]] || { usage; exit 2; }
     put "/vehicle/gear?gear=$2"
+    ;;
+  battery)
+    [[ "${2:-}" =~ ^[0-9]+$ ]] || { usage; exit 2; }
+    put "/vehicle/ev-battery?field=soc&value=$2"
     ;;
   state)
     heartbeat

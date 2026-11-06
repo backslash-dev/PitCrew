@@ -96,7 +96,10 @@ python3 scripts/demo/compose.py /Volumes/T7/pitcrew-captures/demo/take1  # 자�
   ```bash
   adb shell am broadcast -a ai.pitcrew.app.debug.CHECK_NOW -n ai.pitcrew.app/.debug.DebugVoiceReceiver
   adb shell am broadcast -a ai.pitcrew.app.debug.ANSWER --es text 응 -n ai.pitcrew.app/.debug.DebugVoiceReceiver
+  adb shell am broadcast -a ai.pitcrew.app.debug.PERIODIC --ez on false -n ai.pitcrew.app/.debug.DebugVoiceReceiver   # 1분 주기 확인 끄기
+  adb shell am broadcast -a ai.pitcrew.app.debug.ROUTE --es name 강남역 --ef lat 37.4979 --ef lon 127.0276 -n ai.pitcrew.app/.debug.DebugVoiceReceiver
   ```
+- 배터리 잔량은 `scripts/vconsole.sh battery 18`로 바꾼다.
 - 에뮬레이터 ETA가 고정이라 "또 늦음"은 예약 시각을 앞당겨 재현한다.
 
 - 내비 경로·ETA가 고정 목업 값이라 주행해도 남은 시간이 줄지 않는다. 지각 시나리오 시연은 이 값을 기준으로 맞춘다.

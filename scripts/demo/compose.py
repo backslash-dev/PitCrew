@@ -23,16 +23,21 @@ MUTED = (104, 106, 114)
 SDK = {
     "02-home": "PitCrew 서버 · NaviHelper",
     "03-route": "Gleo · NaviHelper",
-    "04-drive": "CarUxRestrictions · 기어(CarProperty)",
-    "05-late": "Gleo Interface · NaviHelper ETA · PitCrew 서버",
-    "07-pickup": "Gleo Interface · NaviHelper 경유지 · FusedLocation",
-    "08-parked": "주차 중 화면 승인 · TextToSpeech",
+    "04-late": "CarUxRestrictions · NaviHelper ETA · TextToSpeech · SpeechToText",
+    "05-pickup": "Gleo Interface · NaviHelper 경유지 · FusedLocation",
+    "06-undo": "Gleo Interface · NaviHelper 경유지 삭제 · PitCrew 서버",
+    "07-routine": "주문 이력 · TextToSpeech · SpeechToText",
+    "08-followup": "NaviHelper ETA · PitCrew 서버 재알림",
+    "09-battery": "Vehicle 배터리 SOC · NaviHelper 경유지",
+    "10-parked": "주차 중 화면 승인 · 진행 단계",
 }
-# 기다리는 구간이 긴 장면은 빠르게 재생한다
-SPEED = {"03-route": 1.6, "05-late": 1.15, "07-pickup": 1.25}
+# 장면 전환이 늘어지지 않게 기본으로 빠르게 재생하고, 기다리는 구간이 긴 장면은 더 빠르게 한다
+DEFAULT_SPEED = 1.3
+SPEED = {"03-route": 2.2, "05-pickup": 1.6, "06-undo": 1.6, "04-late": 1.4, "07-routine": 1.4, "08-followup": 1.4, "09-battery": 1.4}
+# 마지막 자막 뒤로 이만큼만 남기고 자른다
+TAIL_SECONDS = 2.2
 SCENE_NOTE = {
     "02-home": "출발 전 · 오늘 예약과 늦으면 알릴 일행을 PitCrew가 알고 있어요",
-    "08-parked": "도착 직전에는 픽업 매장 3분 전에 음성으로 알려줘요 (에뮬레이터 내비는 남은 시간이 줄지 않아 시연에서 생략)",
 }
 
 
@@ -148,13 +153,13 @@ def still(png: Path, seconds: float, out: Path) -> Path:
     return out
 
 
-def scene_clip(src: Path, overlays: list[tuple[Path, float, float]], speed: float, out: Path) -> Path:
+def scene_clip(src: Path, overlays: list[tuple[Path, float, float]], speed: float, length: float, out: Path) -> Path:
     inputs = ["-i", str(src)]
     chain = [f"[0:v]setpts=PTS/{speed},scale={W}:{H},fps={FPS}[v0]"]
     for i, (png, start, end) in enumerate(overlays, start=1):
         inputs += ["-i", str(png)]
         chain.append(f"[v{i-1}][{i}:v]overlay=0:0:enable='between(t,{start:.2f},{end:.2f})'[v{i}]")
-    run(*inputs, "-filter_complex", ";".join(chain), "-map", f"[v{len(overlays)}]", *ENCODE, str(out))
+    run(*inputs, "-filter_complex", ";".join(chain), "-map", f"[v{len(overlays)}]", "-t", f"{length:.2f}", *ENCODE, str(out))
     return out
 
 
@@ -174,18 +179,20 @@ def main() -> None:
         ("PitCrew", 96, BOLD, (255, 255, 255)),
         ("운전하는 동안, 차 밖의 일은 맡기세요", 52, MEDIUM, (224, 226, 230)),
         ("개발 보고용 시연 · Pleos Connect 에뮬레이터 실동작 녹화 · 음성은 자막으로 표시", 30, REGULAR, (150, 154, 162)),
-    ], dark=True), 4.5, work / "00-title.mp4"))
+    ], dark=True), 2.5, work / "00-title.mp4"))
     clips.append(still(card(work / "problem.png", [
         (f"{spoken(meta['reservation'])} 예약인데, 늦을 것 같다", 60, BOLD, INK),
         ("운전 중에는 휴대폰으로 예약을 바꾸거나 일행에게 연락할 수 없어요", 40, MEDIUM, MUTED),
-        ("PitCrew는 내비 도착 시간으로 판단하고, 말 한마디로 처리해요", 40, MEDIUM, MUTED),
-    ]), 5, work / "01-problem.mp4"))
+        ("PitCrew는 내비 도착 시간으로 먼저 알아채고, 말 한마디로 처리해요", 40, MEDIUM, MUTED),
+    ]), 3.5, work / "01-problem.mp4"))
 
     for scene in meta["scenes"]:
         name = scene["name"]
         src = folder / scene["video"]
-        speed = SPEED.get(name, 1.0)
+        speed = SPEED.get(name, DEFAULT_SPEED)
         length = duration(src) / speed
+        last = max((e["t"] for e in scene["events"]), default=0) / speed
+        length = min(length, max(last + TAIL_SECONDS + 1.5, 4.0))
         overlays: list[tuple[Path, float, float]] = [(chip(work / f"{name}-chip.png", scene["title"], SDK.get(name, "")), 0, length)]
         events = [dict(e, t=e["t"] / speed) for e in scene["events"]]
         if name in SCENE_NOTE:
@@ -199,19 +206,19 @@ def main() -> None:
             if events[i + 1:] and events[i + 1]["kind"] == "gleo":
                 end = max(events[i]["t"] + 2.0, events[i + 1]["t"] - 7.0)
             end = max(end, start + 2.5)
-            speaker = {"user": "운전자", "gleo": "Gleo", "caption": None}[e["kind"]]
+            speaker = {"user": "운전자", "gleo": "Gleo", "pitcrew": "PitCrew", "caption": None}[e["kind"]]
             text = f"“{e['text']}”" if e["kind"] == "user" else e["text"]
             overlays.append((subtitle(work / f"{name}-{i}.png", speaker, text), start, min(end, length)))
-        clips.append(scene_clip(src, overlays, speed, work / f"{name}.mp4"))
-        if name == "05-late":
-            clips.append(still(notification_card(work / "notify.png", meta["reservation"], meta["notifications"]), 6, work / "06-notify.mp4"))
+        clips.append(scene_clip(src, overlays, speed, length, work / f"{name}.mp4"))
+        if name == "04-late":
+            clips.append(still(notification_card(work / "notify.png", meta["reservation"], meta["notifications"]), 4, work / "04b-notify.mp4"))
 
     clips.append(still(card(work / "end.png", [
         ("Pleos Connect SDK 5종을 핵심 기능에 사용", 56, BOLD, (255, 255, 255)),
         ("Vehicle · 주행 상태와 배터리     NaviHelper · ETA와 경유지     FusedLocation · 경로상 매장", 32, MEDIUM, (214, 218, 224)),
-        ("SpeechToText · 주차 중 말로 시키기     TextToSpeech · 결과·도착 직전 안내", 32, MEDIUM, (214, 218, 224)),
-        ("Gleo Interface로 주행 중 음성 승인 · 확대: 충전 대기, 약속 조율, 업무 메일", 32, MEDIUM, (150, 154, 162)),
-    ], dark=True), 6, work / "99-end.mp4"))
+        ("SpeechToText · 먼저 물은 질문에 답 듣기     TextToSpeech · 질문·결과·도착 직전 안내", 32, MEDIUM, (214, 218, 224)),
+        ("Gleo Interface 함수 3개 · 지각 대응, 경로 픽업, 되돌리기 · 확대: 약속 조율, 업무 메일", 32, MEDIUM, (150, 154, 162)),
+    ], dark=True), 4, work / "99-end.mp4"))
 
     listing = work / "concat.txt"
     listing.write_text("".join(f"file '{c.resolve()}'\n" for c in clips))
