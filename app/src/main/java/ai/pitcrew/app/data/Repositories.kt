@@ -28,6 +28,8 @@ interface ReservationRepository {
     val error: StateFlow<String?>
     fun refresh()
     suspend fun ensureLoaded()
+    /** 서버 상태로 지금 다시 맞춘다. 다른 기기·Gleo가 바꾼 예약 시각으로 판단해야 할 때 쓴다. 실패하면 이전 목록을 유지한다. */
+    suspend fun refreshNow()
     fun upsert(reservation: Reservation)
     fun delete(id: String)
 }

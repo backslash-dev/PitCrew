@@ -20,19 +20,30 @@ sealed interface UndoOutcome {
 
 /** 방금 끝낸 작업 되돌리기. 운전 중 오인식으로 잘못 승인한 경우의 안전장치다. */
 class UndoUseCase(private val errands: ErrandService, private val now: () -> LocalDateTime = LocalDateTime::now) {
+    fun target(): Errand? = errands.latestUndoable(now())
+
     suspend fun run(confirmed: Boolean, channel: ApprovalChannel): UndoOutcome {
-        val target = errands.latestUndoable(now()) ?: return UndoOutcome.NothingToUndo
+        val target = target() ?: return UndoOutcome.NothingToUndo
         if (!confirmed) return UndoOutcome.AwaitingConfirmation(target)
         return UndoOutcome.Finished(errands.undo(target.id, channel))
     }
 }
 
+/**
+ * Gleo가 첫 요청부터 confirmed=true를 붙여 보내는 경우가 있다. 엉뚱한 작업을 되돌리지 않도록,
+ * 무엇을 되돌릴지 한 번 알린(asking) 그 작업에 대해서만 확인을 받아들인다.
+ */
 class CancelLastErrandHandler(private val useCase: UndoUseCase) : GleoActionHandler {
     private val function = GleoFunction.CANCEL_LAST_ERRAND
+    @Volatile private var announcedId: String? = null
 
     override suspend fun handle(request: GleoRequest): GleoResponse {
-        val confirmed = request.params.optBoolean("confirmed", false)
-        return when (val outcome = useCase.run(confirmed, ApprovalChannel.VOICE)) {
+        val requested = request.params.optBoolean("confirmed", false)
+        val target = useCase.target()
+        val confirmed = requested && target != null && target.id == announcedId
+        val outcome = useCase.run(confirmed, ApprovalChannel.VOICE)
+        announcedId = (outcome as? UndoOutcome.AwaitingConfirmation)?.errand?.id
+        return when (outcome) {
             UndoOutcome.NothingToUndo -> GleoResponse.fail(
                 function,
                 "There is no PitCrew errand completed in the last few minutes that can still be undone.",
@@ -46,7 +57,7 @@ class CancelLastErrandHandler(private val useCase: UndoUseCase) : GleoActionHand
                 ErrandState.CANCELLED -> GleoResponse.success(
                     function,
                     buildString {
-                        append("Done: PitCrew will ${outcome.errand.undoDescription()}.")
+                        append("PitCrew ${outcome.errand.undoneDescription()}.")
                         if (outcome.errand.undoNote != null) append(" Part of it could not be completed, and the details are shown in the PitCrew app.")
                     },
                     listOf(outcome.errand.toData()),
@@ -63,6 +74,15 @@ class CancelLastErrandHandler(private val useCase: UndoUseCase) : GleoActionHand
         }
         is ErrandDetail.Pickup -> "cancel the ${d.item} pickup order at ${d.store.displayName} and remove the waypoint"
         is ErrandDetail.ChargeAndDine -> "cancel the waitlist at ${d.restaurant.name} and remove the charging stop at ${d.charger.name}"
+    }
+
+    private fun Errand.undoneDescription(): String = when (val d = detail) {
+        is ErrandDetail.LateArrival -> buildString {
+            append("restored the reservation${d.placeName?.let { " at $it" }.orEmpty()} to ${d.appointment.toLocalTime().toClockTime()}")
+            if (d.companions.isNotEmpty()) append(" and sent a correction to ${d.companions.size} companions")
+        }
+        is ErrandDetail.Pickup -> "cancelled the ${d.item} pickup order at ${d.store.displayName} and removed the waypoint"
+        is ErrandDetail.ChargeAndDine -> "cancelled the waitlist at ${d.restaurant.name} and removed the charging stop at ${d.charger.name}"
     }
 
     private fun Errand.toData(): Map<String, Any> = when (val d = detail) {

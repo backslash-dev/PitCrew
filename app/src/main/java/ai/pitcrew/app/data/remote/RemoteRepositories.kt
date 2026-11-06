@@ -125,7 +125,7 @@ class RemoteReservationRepository(private val api: PitCrewApi, scope: CoroutineS
     override val reservations: StateFlow<List<Reservation>> = list.flow
     override val error: StateFlow<String?> = list.errorFlow
     override fun refresh() = list.reload()
-    suspend fun refreshNow() = list.reloadNow()
+    override suspend fun refreshNow() = list.reloadNow()
     override suspend fun ensureLoaded() = list.ensureLoaded()
     override fun upsert(reservation: Reservation) = list.save(reservation)
     override fun delete(id: String) = list.remove(id)

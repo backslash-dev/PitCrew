@@ -57,13 +57,16 @@ class ProactiveAssistant(
     // 한 번 물은 뒤에는 충전해서 다시 올라가기 전까지 묻지 않는다
     private var batteryArmed = true
 
+    /** false면 주기 확인을 멈추고 [checkNow]로만 본다. 시연 녹화가 장면 순서를 정할 때 쓴다. */
+    @Volatile var periodic = true
+
     @Synchronized
     fun start() {
         if (job != null) return
         job = scope.launch {
             while (isActive) {
                 delay(intervalMillis)
-                runTick()
+                if (periodic) runTick()
             }
         }
     }
@@ -96,7 +99,7 @@ class ProactiveAssistant(
     }
 
     private suspend fun lateSuggestion(destination: Destination): Errand? {
-        reservations.ensureLoaded()
+        reservations.refreshNow()
         val reservation = LateWatch.candidate(
             reservations.reservations.value, destination.name, now(), destination.remainTimeSeconds, promptedLate,
         ) ?: return null
@@ -124,7 +127,11 @@ class ProactiveAssistant(
 
     // 답이 없으면 제안은 카드로 남겨 정차 후 화면에서 고를 수 있게 한다
     private suspend fun ask(errand: Errand): Errand {
-        when (confirmer.ask(question(errand))) {
+        val question = question(errand)
+        Log.i(TAG, "asking: $question")
+        val answer = confirmer.ask(question)
+        Log.i(TAG, "answer: $answer")
+        when (answer) {
             Answer.YES -> runCatching { errands.approve(errand.id, ApprovalChannel.VOICE) }
                 .onFailure { if (it is CancellationException) throw it else Log.e(TAG, "approve failed", it) }
             Answer.NO -> errands.decline(errand.id)

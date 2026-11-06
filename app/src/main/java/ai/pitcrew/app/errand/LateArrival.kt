@@ -102,7 +102,7 @@ class LateArrivalUseCase(
             return LateArrivalOutcome.NavigationUnavailable
         } ?: return LateArrivalOutcome.NoRoute
 
-        reservations.ensureLoaded()
+        reservations.refreshNow()
         contacts.ensureLoaded()
         val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
         val reservation = matchReservation(plan.appointment)

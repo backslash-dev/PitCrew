@@ -143,4 +143,12 @@ class CancelLastErrandHandlerTest {
         assertEquals(ErrandState.CANCELLED, errands.errands.value.single().state)
         assertEquals(GleoStatus.FAIL, handler.handle(request(true)).status)
     }
+
+    @Test
+    fun `알리지 않고 바로 확인으로 온 요청은 먼저 무엇을 되돌릴지 묻는다`() = runTest {
+        errands.approve(errands.propose(pickup).id, ApprovalChannel.VOICE)
+        assertEquals(GleoStatus.ASKING, handler.handle(request(true)).status)
+        assertEquals(ErrandState.COMPLETED, errands.errands.value.single().state)
+        assertEquals(GleoStatus.SUCCESS, handler.handle(request(true)).status)
+    }
 }

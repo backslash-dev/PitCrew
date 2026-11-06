@@ -31,6 +31,7 @@ class InMemoryReservationRepository(seed: List<Reservation>) : ReservationReposi
     override val error: StateFlow<String?> = MutableStateFlow(null)
     override fun refresh() = Unit
     override suspend fun ensureLoaded() = Unit
+    override suspend fun refreshNow() = Unit
 
     override fun upsert(reservation: Reservation) = _reservations.update { list ->
         (list.filterNot { it.id == reservation.id } + reservation).sortedBy { it.time }
