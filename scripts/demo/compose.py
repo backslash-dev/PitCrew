@@ -1,4 +1,4 @@
-"""record.py가 찍은 장면들에 자막·카드를 입혀 시연 영상 하나로 합친다.
+"""record.py가 찍은 장면들에 자막을 입혀 시연 영상 하나로 합친다. 별도 카드 없이 실제 화면만 쓴다.
 
 이 맥의 ffmpeg에는 자막 필터(libass)가 없어 자막을 PNG로 그려 overlay로 얹는다.
 사용: python3 scripts/demo/compose.py <녹화 폴더>
@@ -14,10 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 W, H, FPS = 1920, 1080, 30
 FONT = "/System/Library/Fonts/AppleSDGothicNeo.ttc"
-REGULAR, MEDIUM, BOLD = 0, 2, 6
-INK = (19, 20, 23)
-PAPER = (247, 248, 250)
-MUTED = (104, 106, 114)
+MEDIUM, BOLD = 2, 6
 
 # 장면 전환이 늘어지지 않게 기본으로 빠르게 재생하고, 기다리는 구간이 긴 장면은 더 빠르게 한다
 DEFAULT_SPEED = 1.3
@@ -88,56 +85,11 @@ def chip(path: Path, title: str) -> Path:
     return path
 
 
-def card(path: Path, lines: list[tuple[str, int, int, tuple[int, int, int]]], dark: bool = False) -> Path:
-    """전체 화면 카드. lines는 (문장, 크기, 굵기, 색) 목록이며 위에서부터 왼쪽 정렬로 놓는다."""
-    im = Image.new("RGB", (W, H), INK if dark else PAPER)
-    d = ImageDraw.Draw(im)
-    total = sum(int(size * 1.5) for _, size, _, _ in lines)
-    y = (H - total) // 2
-    for text, size, weight, color in lines:
-        d.text((180, y), text, font=font(size, weight), fill=color)
-        y += int(size * 1.5)
-    im.save(path)
-    return path
-
-
-def notification_card(path: Path, reservation: str, notifications: list[dict]) -> Path:
-    im = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(im)
-    d.text((180, 170), "같은 시각, 일행에게 간 알림", font=font(64, BOLD), fill=INK)
-    d.text((180, 262), "PitCrew 서버 발송 내역 · 실제 문자 연동은 발신번호 등록 후 같은 경로로 붙어요", font=font(32, MEDIUM), fill=MUTED)
-    y = 380
-    for n in notifications:
-        d.text((180, y), n["name"], font=font(34, BOLD), fill=INK)
-        bubble = wrap(n["message"], font(36, MEDIUM), 1300)
-        bh = 40 + 54 * len(bubble)
-        d.rounded_rectangle((180, y + 54, 180 + 1400, y + 54 + bh), radius=28, fill=(255, 255, 255))
-        ty = y + 74
-        for line in bubble:
-            d.text((220, ty), line, font=font(36, MEDIUM), fill=INK)
-            ty += 54
-        y += 54 + bh + 56
-    im.save(path)
-    return path
-
-
-def spoken(hhmm: str) -> str:
-    """운전자 대사와 같은 말투(12시간제, 반)로 시각을 쓴다."""
-    hour, minute = map(int, hhmm.split(":"))
-    hour = hour % 12 or 12
-    return f"{hour}시" if minute == 0 else f"{hour}시 반" if minute == 30 else f"{hour}시 {minute}분"
-
-
 def run(*args: str) -> None:
     subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
 
 
 ENCODE = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r", str(FPS), "-an"]
-
-
-def still(png: Path, seconds: float, out: Path) -> Path:
-    run("-loop", "1", "-t", str(seconds), "-i", str(png), "-vf", f"scale={W}:{H}", *ENCODE, str(out))
-    return out
 
 
 def scene_clip(src: Path, overlays: list[tuple[Path, float, float]], speed: float, length: float, out: Path) -> Path:
@@ -161,17 +113,6 @@ def main() -> None:
     work = folder / "compose"
     work.mkdir(exist_ok=True)
     clips: list[Path] = []
-
-    clips.append(still(card(work / "title.png", [
-        ("PitCrew", 96, BOLD, (255, 255, 255)),
-        ("운전하는 동안, 차 밖의 일은 맡기세요", 52, MEDIUM, (224, 226, 230)),
-        ("개발 보고용 시연 · Pleos Connect 에뮬레이터 실동작 녹화 · 음성은 자막으로 표시", 30, REGULAR, (150, 154, 162)),
-    ], dark=True), 2.5, work / "00-title.mp4"))
-    clips.append(still(card(work / "problem.png", [
-        (f"{spoken(meta['reservation'])} 예약인데, 늦을 것 같다", 60, BOLD, INK),
-        ("운전 중에는 휴대폰으로 예약을 바꾸거나 일행에게 연락할 수 없어요", 40, MEDIUM, MUTED),
-        ("PitCrew는 내비 도착 시간으로 먼저 알아채고, 말 한마디로 처리해요", 40, MEDIUM, MUTED),
-    ]), 3.5, work / "01-problem.mp4"))
 
     for scene in meta["scenes"]:
         name = scene["name"]
@@ -203,15 +144,6 @@ def main() -> None:
             text = f"“{e['text']}”" if e["kind"] == "user" else e["text"]
             overlays.append((subtitle(work / f"{name}-{i}.png", speaker, text), start, min(end, length)))
         clips.append(scene_clip(src, overlays, speed, length, work / f"{name}.mp4"))
-        if name == "04-late":
-            clips.append(still(notification_card(work / "notify.png", meta["reservation"], meta["notifications"]), 4, work / "04b-notify.mp4"))
-
-    clips.append(still(card(work / "end.png", [
-        ("Pleos Connect SDK 5종을 핵심 기능에 사용", 56, BOLD, (255, 255, 255)),
-        ("Vehicle · 주행 상태와 배터리     NaviHelper · ETA와 경유지     FusedLocation · 경로상 매장", 32, MEDIUM, (214, 218, 224)),
-        ("SpeechToText · 먼저 물은 질문에 답 듣기     TextToSpeech · 질문·결과·도착 직전 안내", 32, MEDIUM, (214, 218, 224)),
-        ("Gleo Interface 함수 3개 · 지각 대응, 경로 픽업, 되돌리기 · 확대: 약속 조율, 업무 메일", 32, MEDIUM, (150, 154, 162)),
-    ], dark=True), 4, work / "99-end.mp4"))
 
     listing = work / "concat.txt"
     listing.write_text("".join(f"file '{c.resolve()}'\n" for c in clips))
