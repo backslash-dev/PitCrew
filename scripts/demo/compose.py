@@ -36,6 +36,9 @@ DEFAULT_SPEED = 1.3
 SPEED = {"03-route": 2.2, "05-pickup": 1.6, "06-undo": 1.6, "04-late": 1.4, "07-routine": 1.4, "08-followup": 1.4, "09-battery": 1.4}
 # 마지막 자막 뒤로 이만큼만 남기고 자른다
 TAIL_SECONDS = 2.2
+MIN_SUBTITLE_SECONDS = 2.2
+# 자막 뒤에 보여 줄 화면 동작(상세 화면 열기)이 있는 장면은 자르지 않는다
+NO_TRIM = {"10-parked"}
 SCENE_NOTE = {
     "02-home": "출발 전 · 오늘 예약과 늦으면 알릴 일행을 PitCrew가 알고 있어요",
 }
@@ -190,22 +193,28 @@ def main() -> None:
         name = scene["name"]
         src = folder / scene["video"]
         speed = SPEED.get(name, DEFAULT_SPEED)
-        length = duration(src) / speed
-        last = max((e["t"] for e in scene["events"]), default=0) / speed
-        length = min(length, max(last + TAIL_SECONDS + 1.5, 4.0))
+        full = duration(src) / speed
+        length = full
         overlays: list[tuple[Path, float, float]] = [(chip(work / f"{name}-chip.png", scene["title"], SDK.get(name, "")), 0, length)]
         events = [dict(e, t=e["t"] / speed) for e in scene["events"]]
         if name in SCENE_NOTE:
             events.insert(0, {"t": 0.3, "kind": "caption", "text": SCENE_NOTE[name]})
+        # 자막이 겹치지 않게 앞 자막을 최소 시간만큼 보여 준 뒤 다음 자막을 띄운다
+        starts: list[float] = []
         for i, e in enumerate(events):
             start = e["t"]
             if e["kind"] == "gleo" and i > 0:
                 # Gleo 발화는 말이 끝난 시점에 기록되므로, 앞 대사 뒤부터 보이게 당긴다
                 start = max(events[i - 1]["t"] + 2.0, start - 7.0)
-            end = events[i + 1]["t"] if i + 1 < len(events) else length
-            if events[i + 1:] and events[i + 1]["kind"] == "gleo":
-                end = max(events[i]["t"] + 2.0, events[i + 1]["t"] - 7.0)
-            end = max(end, start + 2.5)
+            if starts:
+                start = max(start, starts[-1] + MIN_SUBTITLE_SECONDS)
+            starts.append(start)
+        # 마지막 자막 뒤로 조금만 남기고 자르되 원본 길이는 넘지 않는다
+        if name not in NO_TRIM:
+            length = min(full, max((starts[-1] if starts else 0) + MIN_SUBTITLE_SECONDS + TAIL_SECONDS, 4.0))
+        for i, e in enumerate(events):
+            start = starts[i]
+            end = starts[i + 1] if i + 1 < len(events) else length
             speaker = {"user": "운전자", "gleo": "Gleo", "pitcrew": "PitCrew", "caption": None}[e["kind"]]
             text = f"“{e['text']}”" if e["kind"] == "user" else e["text"]
             overlays.append((subtitle(work / f"{name}-{i}.png", speaker, text), start, min(end, length)))
