@@ -19,18 +19,6 @@ INK = (19, 20, 23)
 PAPER = (247, 248, 250)
 MUTED = (104, 106, 114)
 
-# 장면마다 쓰인 플랫폼 기능. 심사 항목(SDK 활용)을 화면에서 바로 읽히게 한다
-SDK = {
-    "02-home": "PitCrew 서버 · NaviHelper",
-    "03-route": "Gleo · NaviHelper",
-    "04-late": "CarUxRestrictions · NaviHelper ETA · TextToSpeech · SpeechToText",
-    "05-pickup": "Gleo Interface · NaviHelper 경유지 · FusedLocation",
-    "06-undo": "Gleo Interface · NaviHelper 경유지 삭제 · PitCrew 서버",
-    "07-routine": "주문 이력 · TextToSpeech · SpeechToText",
-    "08-followup": "NaviHelper ETA · PitCrew 서버 재알림",
-    "09-battery": "Vehicle 배터리 SOC · NaviHelper 경유지",
-    "10-parked": "주차 중 화면 승인 · 진행 단계",
-}
 # 장면 전환이 늘어지지 않게 기본으로 빠르게 재생하고, 기다리는 구간이 긴 장면은 더 빠르게 한다
 DEFAULT_SPEED = 1.3
 SPEED = {"03-route": 2.2, "05-pickup": 1.6, "06-undo": 1.6, "04-late": 1.4, "07-routine": 1.4, "08-followup": 1.4, "09-battery": 1.4}
@@ -88,18 +76,14 @@ def subtitle(path: Path, speaker: str | None, text: str) -> Path:
     return path
 
 
-def chip(path: Path, title: str, sdk: str) -> Path:
-    """장면 이름과 쓰인 기능. 화면 위쪽 좌우에 작게 둔다."""
+def chip(path: Path, title: str) -> Path:
+    """장면 이름. 화면 왼쪽 위에 작게 둔다."""
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     t = font(34, BOLD)
-    s = font(26, MEDIUM)
     tw = int(t.getlength(title)) + 48
     d.rounded_rectangle((32, 96, 32 + tw, 96 + 64), radius=16, fill=(12, 13, 15, 214))
     d.text((56, 108), title, font=t, fill=(255, 255, 255))
-    sw = int(s.getlength(sdk)) + 40
-    d.rounded_rectangle((W - 32 - sw, 100, W - 32, 100 + 56), radius=14, fill=(12, 13, 15, 190))
-    d.text((W - 32 - sw + 20, 112), sdk, font=s, fill=(214, 218, 224))
     im.save(path)
     return path
 
@@ -195,7 +179,7 @@ def main() -> None:
         speed = SPEED.get(name, DEFAULT_SPEED)
         full = duration(src) / speed
         length = full
-        overlays: list[tuple[Path, float, float]] = [(chip(work / f"{name}-chip.png", scene["title"], SDK.get(name, "")), 0, length)]
+        overlays: list[tuple[Path, float, float]] = [(chip(work / f"{name}-chip.png", scene["title"]), 0, length)]
         events = [dict(e, t=e["t"] / speed) for e in scene["events"]]
         if name in SCENE_NOTE:
             events.insert(0, {"t": 0.3, "kind": "caption", "text": SCENE_NOTE[name]})
