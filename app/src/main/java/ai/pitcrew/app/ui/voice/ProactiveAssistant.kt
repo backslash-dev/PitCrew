@@ -148,7 +148,7 @@ class ProactiveAssistant(
         fun question(errand: Errand): String = when (val d = errand.detail) {
             is ErrandDetail.LateArrival -> buildString {
                 val place = d.placeName ?: "약속"
-                if (d.followUp) append("길이 더 막혀 $place 예약에 또 ${d.delayMinutes}분 늦어요. ")
+                if (d.followUp) append("도착이 더 늦어져 $place 예약에 또 ${d.delayMinutes}분 늦어요. ")
                 else append("지금 가면 $place 예약보다 ${d.delayMinutes}분 늦어요. ")
                 append("예약을 ${d.proposedTime.hhmm()}에 다시 ")
                 append(if (d.companions.isEmpty()) "잡을까요?" else "잡고 일행 ${d.companions.size}명에게 알릴까요?")

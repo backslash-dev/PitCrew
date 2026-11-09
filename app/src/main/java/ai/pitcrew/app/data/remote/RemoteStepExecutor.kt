@@ -73,7 +73,7 @@ class RemoteStepExecutor(
         3 -> {
             val place = d.placeName ?: "약속"
             val message = if (d.followUp) {
-                "PitCrew 알림 · 길이 더 막혀 $place 예약을 한 번 더 미뤘어요. 새 예약 ${d.proposedTime.hhmm()}, 도착 예정 ${d.estimatedArrival.hhmm()}."
+                "PitCrew 알림 · 도착이 더 늦어져 $place 예약을 한 번 더 미뤘어요. 새 예약 ${d.proposedTime.hhmm()}, 도착 예정 ${d.estimatedArrival.hhmm()}."
             } else {
                 "PitCrew 알림 · $place 예약을 ${d.proposedTime.hhmm()}에 다시 잡았어요. 도착 예정 ${d.estimatedArrival.hhmm()}."
             }

@@ -102,7 +102,7 @@ class ProactiveAssistantTest {
         route = Destination("강남역", 60 * 60, 13_000)
         val again = tickAnswering(a, "아니")!!
         assertTrue((again.detail as ErrandDetail.LateArrival).followUp)
-        assertTrue(speaker.spoken.last().startsWith("길이 더 막혀 온담 한식당 예약에 또 10분 늦어요."))
+        assertTrue(speaker.spoken.last().startsWith("도착이 더 늦어져 온담 한식당 예약에 또 10분 늦어요."))
         assertEquals(ErrandState.DECLINED, errands.errands.value.first().state)
     }
 
