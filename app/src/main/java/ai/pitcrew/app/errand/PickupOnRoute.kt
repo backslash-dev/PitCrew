@@ -72,9 +72,13 @@ class PickupUseCase(
         } catch (e: SdkUnavailableException) {
             return PickupOutcome.NavigationUnavailable
         } ?: return PickupOutcome.NoRoute
+        // 같은 메뉴를 먼저 물은 제안이 없으면 확인이 붙어 와도(Gleo가 첫 요청부터 confirmed를 붙인 경우) 다시 묻는다
+        val asked = errands.errands.value.any {
+            it.state == ErrandState.AWAITING_APPROVAL && (it.detail as? ErrandDetail.Pickup)?.item == item
+        }
         val readyAt = PickupPlanner.readyAt(store, now(), destination.remainTimeSeconds)
         val errand = errands.propose(ErrandDetail.Pickup(item, store, readyAt), origin)
-        if (!confirmed) return PickupOutcome.AwaitingApproval(errand)
+        if (!confirmed || !asked) return PickupOutcome.AwaitingApproval(errand)
         return PickupOutcome.Finished(errands.approve(errand.id, channel))
     }
 }

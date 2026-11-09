@@ -52,6 +52,7 @@ class PickupOnRouteTest {
 
     @Test
     fun `승인하면 주문하고 경유지를 추가한다`() = runTest {
+        handler.handle(request("item" to "아메리카노"))
         assertEquals(GleoStatus.SUCCESS, handler.handle(request("item" to "아메리카노", "confirmed" to true)).status)
         assertEquals(ErrandState.COMPLETED, errands.errands.value.single().state)
     }
@@ -59,8 +60,15 @@ class PickupOnRouteTest {
     @Test
     fun `경유지 추가에 실패하면 실패로 알린다`() = runTest {
         waypointResult = false
+        handler.handle(request("item" to "아메리카노"))
         assertEquals(GleoStatus.FAIL, handler.handle(request("item" to "아메리카노", "confirmed" to true)).status)
         assertEquals(ErrandState.FAILED, errands.errands.value.single().state)
+    }
+
+    @Test
+    fun `묻기 전에 확인이 붙어 오면 주문하지 않고 먼저 묻는다`() = runTest {
+        assertEquals(GleoStatus.ASKING, handler.handle(request("item" to "아메리카노", "confirmed" to true)).status)
+        assertEquals(ErrandState.AWAITING_APPROVAL, errands.errands.value.single().state)
     }
 
     @Test

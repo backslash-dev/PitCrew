@@ -9,6 +9,8 @@ import ai.pitcrew.app.domain.Contact
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.ErrandStep
+import ai.pitcrew.app.domain.StepState
 import ai.pitcrew.app.testing.FakeWaypoints
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
@@ -73,6 +75,8 @@ class RemoteServerTest {
         companions = listOf(Contact("5f3c1b7e-2a4d-4c1e-9b8a-1d2e3f4a5b01", "김민수", "010-2481-3307")),
     )
 
+    private fun notified(e: Errand) = e.copy(steps = listOf(ErrandStep("일행 알림", StepState.DONE)))
+
     private fun errand(detail: ErrandDetail) = Errand("e1", now, ErrandState.IN_PROGRESS, detail, emptyList(), approvedVia = ApprovalChannel.TOUCH)
 
     @Test
@@ -107,7 +111,7 @@ class RemoteServerTest {
         respond(200, """{"results":[{"contactId":"a","name":"김민수","status":"SENT"}]}""")
         var reloaded = 0
         val executor = RemoteStepExecutor(api, reloadReservations = { reloaded++ }, waypoints = FakeWaypoints()) { now }
-        assertEquals(UndoResult.Undone(), executor.undo(errand(late).copy(reference = "c-1")))
+        assertEquals(UndoResult.Undone(), executor.undo(notified(errand(late)).copy(reference = "c-1")))
         assertEquals("/v1/reservation-changes/c-1/revert", server.takeRequest().path)
         assertTrue(server.takeRequest().body.readUtf8().contains("앞서 보낸 안내는 취소됐어요. 온담 한식당 예약은 23:40 그대로예요."))
         assertEquals(1, reloaded)
@@ -120,8 +124,24 @@ class RemoteServerTest {
         val executor = RemoteStepExecutor(api, reloadReservations = {}, waypoints = FakeWaypoints()) { now }
         assertEquals(
             UndoResult.Undone("예약은 되돌렸지만 일행 1명에게 정정 안내를 보내지 못했어요"),
-            executor.undo(errand(late).copy(reference = "c-1")),
+            executor.undo(notified(errand(late)).copy(reference = "c-1")),
         )
+    }
+
+    @Test
+    fun `알림 전에 실패한 예약 변경은 되돌려도 정정 안내를 보내지 않는다`() = runTest {
+        respond(200, """{"reservedAt":"${late.appointment.toInstantString()}"}""")
+        val executor = RemoteStepExecutor(api, reloadReservations = {}, waypoints = FakeWaypoints()) { now }
+        val failed = errand(late).copy(state = ErrandState.FAILED, reference = "c-1", steps = listOf(ErrandStep("일행 알림", StepState.FAILED)))
+        assertEquals(UndoResult.Undone(), executor.undo(failed))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `식당이 다른 시각으로 잡아도 되돌릴 수 있게 변경 id를 남긴다`() = runTest {
+        respond(200, """{"reservedAt":"2026-11-06T00:10:00+09:00","changeId":"c-9"}""")
+        val executor = RemoteStepExecutor(api, reloadReservations = {}, waypoints = FakeWaypoints()) { now }
+        assertEquals(StepResult.Failed("식당이 다른 시간으로 잡았어요", reference = "c-9"), executor.execute(errand(late), 1))
     }
 
     @Test

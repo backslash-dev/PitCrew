@@ -20,13 +20,15 @@ object AnswerClassifier {
     // "안 해줘"처럼 거절 안에 승낙 낱말이 들어가므로 거절부터 본다
     private val NO = Regex("아니|싫어|됐어|괜찮아|하지\\s*마|안\\s*해|거절|취소|나중에|그만")
     // "어떡하지"처럼 같은 글자로 시작하는 말을 승낙으로 보지 않도록 짧은 답은 뒤가 끊겨야 한다
-    private val YES = Regex("^(응|어|네|예|넵|그래|좋아|오케이|콜)(?=$|[\\s.!,?요응네])|해\\s*줘|부탁|승인|그렇게|맞아")
+    private val YES = Regex("^(응|어|네|예|넵|그래|좋아|오케이|콜)(?=$|[\\s.!,요응네])|해\\s*줘|부탁|승인|그렇게|맞아")
 
     fun classify(text: String): Answer {
         val t = text.trim()
         return when {
             t.isEmpty() -> Answer.NONE
             NO.containsMatchIn(t) -> Answer.NO
+            // "어?", "네?"처럼 되묻는 말은 못 들었다는 뜻이라 승낙으로 보지 않는다
+            t.endsWith("?") -> Answer.NONE
             YES.containsMatchIn(t) -> Answer.YES
             else -> Answer.NONE
         }

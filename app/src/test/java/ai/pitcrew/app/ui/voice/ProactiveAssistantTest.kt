@@ -159,7 +159,7 @@ class VoiceConfirmerTest {
     fun `승낙과 거절 말을 가린다`() {
         listOf("응", "네 해줘", "그래", "좋아요", "부탁해", "응응").forEach { assertEquals(it, Answer.YES, AnswerClassifier.classify(it)) }
         listOf("아니", "안 해줘", "괜찮아", "하지 마", "나중에").forEach { assertEquals(it, Answer.NO, AnswerClassifier.classify(it)) }
-        listOf("", "어떡하지", "음…").forEach { assertEquals(it, Answer.NONE, AnswerClassifier.classify(it)) }
+        listOf("", "어떡하지", "음…", "어?", "네?", "응?").forEach { assertEquals(it, Answer.NONE, AnswerClassifier.classify(it)) }
     }
 
     @Test

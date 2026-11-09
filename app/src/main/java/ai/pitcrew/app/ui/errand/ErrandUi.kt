@@ -89,6 +89,7 @@ fun Errand.outcomeLine(): String? = when (state) {
         failureReason?.let { "$step · $it" } ?: step
     }
     ErrandState.DECLINED -> "거절해서 진행하지 않았어요"
+    ErrandState.EXPIRED -> "답이 없어 진행하지 않았어요"
     ErrandState.CANCELLED -> {
         // 일부를 못 했으면(정정 안내·경유지 삭제) 한 일만 말하고 못 한 일은 안내 문장으로 붙인다
         val partial = undoNote != null

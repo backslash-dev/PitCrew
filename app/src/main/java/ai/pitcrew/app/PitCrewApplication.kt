@@ -39,13 +39,18 @@ import ai.pitcrew.app.ui.voice.VoiceAnnouncer
 import ai.pitcrew.app.ui.voice.VoiceCommandController
 import ai.pitcrew.app.ui.voice.VoiceConfirmer
 import android.app.Application
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import java.time.LocalDateTime
 
 class PitCrewApplication : Application() {
-    val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // 놓친 예외 하나로 앱 전체가 종료되지 않게 기록만 하고 넘긴다. 각 기능은 자기 오류를 먼저 처리해야 한다
+    val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> Log.e("PitCrewApplication", "uncaught in app scope", e) },
+    )
 
     val platform: PlatformServices by lazy { PlatformServices(this) }
     val preferences: AppPreferences by lazy { AppPreferences(this) }
@@ -79,7 +84,7 @@ class PitCrewApplication : Application() {
             MockStepExecutor(waypoints)
         }
         // 목업은 처리 시간이 없으므로 진행이 보이도록 단계 사이를 띄운다
-        ErrandRunner(executor, stepDelayMillis = if (remote != null) 0 else 600)
+        ErrandRunner(executor, stepDelayMillis = if (remote != null) 0 else 600, workScope = scope)
     }
 
     val lateArrival: LateArrivalUseCase by lazy {

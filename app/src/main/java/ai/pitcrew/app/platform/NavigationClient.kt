@@ -128,17 +128,26 @@ class NavigationClient(context: Context) : AutoCloseable {
 
     /**
      * 내비에 현재 목적지를 물어 응답을 기다린다. 경로가 없으면 null.
-     * @throws SdkUnavailableException 내비 SDK 초기화에 실패했을 때
+     * 내비가 답하지 않으면 기다리지 않고 연결 실패로 본다. 응답이 없을 때 호출한 쪽(먼저 묻기·Gleo)이 멈추지 않게 한다.
+     * @throws SdkUnavailableException 내비 SDK 초기화에 실패했거나 제한 시간 안에 답이 없을 때
      */
     suspend fun fetchDestination(): Destination? {
-        val status = status.first { it != SdkStatus.Connecting }
+        // Gleo 방송으로 앱이 막 깨어났으면 SDK 연결에 몇 초 걸리므로 연결 대기와 응답 대기를 따로 잰다
+        val status = withTimeoutOrNull(CONNECT_MILLIS) { status.first { it != SdkStatus.Connecting } }
+            ?: throw SdkUnavailableException("navigation", "not connected in ${CONNECT_MILLIS}ms")
         if (status is SdkStatus.Failed) throw SdkUnavailableException("navigation", status.reason)
-        return coroutineScope {
-            val reply = async(start = CoroutineStart.UNDISPATCHED) { destinationReplies.first() }
-            navi.getDestinationInfo()
-            reply.await()
-        }
+        val reply = withTimeoutOrNull(DESTINATION_REPLY_MILLIS) {
+            coroutineScope {
+                val reply = async(start = CoroutineStart.UNDISPATCHED) { destinationReplies.first() }
+                navi.getDestinationInfo()
+                Reply(reply.await())
+            }
+        } ?: throw SdkUnavailableException("navigation", "no reply in ${DESTINATION_REPLY_MILLIS}ms")
+        return reply.destination
     }
+
+    // 경로 없음(null)과 시간 초과(null)를 구분하려고 감싼다
+    private class Reply(val destination: Destination?)
 
     /** 목적지로 경로 안내를 요청한다. 결과 콜백이 없어 요청이 예외 없이 전달됐는지만 확인한다. */
     fun requestRoute(name: String, latitude: Double, longitude: Double): Boolean {
@@ -196,6 +205,8 @@ class NavigationClient(context: Context) : AutoCloseable {
     private companion object {
         const val TAG = "NavigationClient"
         const val WAYPOINT_REPLY_MILLIS = 2_000L
+        const val DESTINATION_REPLY_MILLIS = 2_000L
+        const val CONNECT_MILLIS = 4_000L
     }
 }
 

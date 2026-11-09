@@ -8,6 +8,9 @@ import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.ErrandStep
 import ai.pitcrew.app.domain.StepState
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,7 +26,8 @@ sealed interface StepResult {
     data object Done : StepResult
     /** 성공했고, 되돌릴 때 쓸 서버 쪽 식별자를 남긴다. */
     data class Recorded(val reference: String) : StepResult
-    data class Failed(val reason: String?) : StepResult
+    /** [reference]는 서버에서 이미 처리된 뒤 실패한 경우(예: 주문은 됐는데 경유지 실패) 되돌릴 수 있게 남긴다. */
+    data class Failed(val reason: String?, val reference: String? = null) : StepResult
 }
 
 sealed interface UndoResult {
@@ -41,12 +45,16 @@ fun interface StepExecutor {
 
 /**
  * 작업의 상태 흐름(제안 → 승인 → 단계 진행 → 완료·실패 → 되돌리기)을 관리한다. 각 단계의 실제 처리는 [executor]가 맡는다.
- * 단계 사이 지연은 화면에서 진행이 보이게 하는 값이며, 전체가 Gleo 응답 예산(5초) 안에 끝나야 한다.
+ * 단계 사이 지연은 화면에서 진행이 보이게 하는 값이다.
+ *
+ * [workScope]가 있으면 승인 뒤 실행과 되돌리기를 그 범위에서 돌린다. 기다리던 쪽(Gleo 5초 예산)이 시간 초과로 취소돼도
+ * 서버에 이미 보낸 요청과 화면 상태가 어긋나지 않도록 끝까지 진행한다.
  */
 class ErrandRunner(
     private val executor: StepExecutor,
     private val now: () -> LocalDateTime = LocalDateTime::now,
     private val stepDelayMillis: Long = 0,
+    private val workScope: CoroutineScope? = null,
 ) : ErrandService {
     private val _errands = MutableStateFlow<List<Errand>>(emptyList())
     override val errands: StateFlow<List<Errand>> = _errands.asStateFlow()
@@ -70,6 +78,11 @@ class ErrandRunner(
         mutex.withLock {
             val current = find(id) ?: throw NoSuchElementException("errand $id")
             if (current.state != ErrandState.AWAITING_APPROVAL) return current
+            // 오래된 제안을 승인하면 지난 픽업 시각이 다음 날로 넘어가는 등 엉뚱하게 실행되므로 만료시킨다
+            if (current.isStale(now())) {
+                expire(id)
+                return find(id)!!
+            }
             update(id) { errand ->
                 errand.copy(
                     state = ErrandState.IN_PROGRESS,
@@ -84,6 +97,10 @@ class ErrandRunner(
                 )
             }
         }
+        return detached { runSteps(id) }
+    }
+
+    private suspend fun runSteps(id: String): Errand {
         for (stepIndex in 1 until find(id)!!.steps.size) {
             if (stepDelayMillis > 0) delay(stepDelayMillis)
             // 앞 단계가 남긴 식별자를 다음 단계가 볼 수 있게 매번 최신 상태로 넘긴다
@@ -95,6 +112,7 @@ class ErrandRunner(
                         state = ErrandState.FAILED,
                         finishedAt = now(),
                         failureReason = result.reason,
+                        reference = result.reference ?: e.reference,
                         steps = e.steps.mapIndexed { i, s -> if (i == stepIndex) s.copy(state = StepState.FAILED, at = now()) else s },
                     )
                 }
@@ -133,13 +151,17 @@ class ErrandRunner(
             val current = find(id) ?: throw NoSuchElementException("errand $id")
             if (!current.canUndo(now())) {
                 // 화면 시계가 늦어 버튼이 남아 있던 경우에도 왜 안 되는지 보이게 한다
-                if (current.state == ErrandState.COMPLETED && !current.undoing) {
+                if (current.undoable && !current.undoing) {
                     update(id) { it.copy(undoNote = "끝낸 지 ${Errand.UNDO_WINDOW.toMinutes()}분이 지나 되돌릴 수 없어요") }
                 }
                 return find(id)!!
             }
             update(id) { it.copy(undoing = true, undoNote = null) }
         }
+        return detached { runUndo(id, channel) }
+    }
+
+    private suspend fun runUndo(id: String, channel: ApprovalChannel): Errand {
         val result = runCatching { executor.undo(find(id)!!) }
             .getOrElse { e -> if (e is CancellationException) throw e else UndoResult.Failed(e.message ?: "되돌리지 못했어요") }
         update(id) { e ->
@@ -157,6 +179,23 @@ class ErrandRunner(
         }
         return find(id)!!
     }
+
+    override fun expireStale() {
+        val at = now()
+        _errands.value.filter { it.state == ErrandState.AWAITING_APPROVAL && it.isStale(at) }.forEach { expire(it.id) }
+    }
+
+    private fun expire(id: String) = update(id) { errand ->
+        if (errand.state != ErrandState.AWAITING_APPROVAL) errand
+        else errand.copy(
+            state = ErrandState.EXPIRED,
+            finishedAt = now(),
+            steps = errand.steps.mapIndexed { i, s -> if (i == 0) s.copy(title = "응답이 없어 넘어감", state = StepState.FAILED, at = now()) else s },
+        )
+    }
+
+    private suspend fun detached(block: suspend () -> Errand): Errand =
+        workScope?.async(NonCancellable) { block() }?.await() ?: block()
 
     private fun find(id: String) = _errands.value.firstOrNull { it.id == id }
 

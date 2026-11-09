@@ -166,4 +166,13 @@ class LateArrivalHandlerTest {
         val response = handler { throw SdkUnavailableException("navigation", "bind failed") }.handle(request("appointmentTime" to "19:00"))
         assertEquals(GleoStatus.FAIL, response.status)
     }
+
+    @Test
+    fun `묻기 전에 승인 시각이 붙어 오면 바꾸지 않고 먼저 묻는다`() = runTest {
+        val response = handler { route }.handle(request("appointmentTime" to "19:00", "confirmedTime" to "19:40"))
+        assertEquals(GleoStatus.ASKING, response.status)
+        val errand = errands.errands.value.single()
+        assertEquals(ErrandState.AWAITING_APPROVAL, errand.state)
+        assertEquals(LocalTime.of(19, 30), (errand.detail as ErrandDetail.LateArrival).proposedTime)
+    }
 }

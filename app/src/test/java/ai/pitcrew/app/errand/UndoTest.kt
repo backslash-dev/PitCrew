@@ -16,6 +16,7 @@ import ai.pitcrew.app.gleo.GleoStatus
 import ai.pitcrew.app.testing.FakeWaypoints
 import ai.pitcrew.app.ui.errand.outcomeLine
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -111,6 +112,60 @@ class ErrandUndoTest {
         val b = async { runner.undo(id, ApprovalChannel.VOICE) }
         a.await(); b.await()
         assertEquals(1, calls)
+    }
+}
+
+class ErrandLifecycleTest {
+    private var now = LocalDateTime.of(2026, 11, 5, 18, 0)
+    private val pickup = ErrandDetail.Pickup("아메리카노", MockStoreCatalog.DEFAULT_STORES.first(), LocalTime.of(18, 20))
+    private val late = ErrandDetail.LateArrival("r1", "온담 한식당", now.plusMinutes(30), now.plusMinutes(45), 15, LocalTime.of(18, 50), emptyList())
+
+    @Test
+    fun `답 없는 제안은 10분이 지나거나 픽업 시각이 지나면 만료되고 승인되지 않는다`() = runTest {
+        val runner = ErrandRunner(MockStepExecutor(FakeWaypoints()), now = { now })
+        val lateId = runner.propose(late).id
+        val pickupId = runner.propose(pickup).id
+        now = now.plusMinutes(9)
+        runner.expireStale()
+        assertEquals(ErrandState.AWAITING_APPROVAL, runner.errands.value.single { it.id == lateId }.state)
+        now = now.plusMinutes(1)
+        assertEquals(ErrandState.EXPIRED, runner.approve(lateId, ApprovalChannel.TOUCH).state)
+        runner.expireStale()
+        assertEquals(ErrandState.EXPIRED, runner.errands.value.single { it.id == pickupId }.state)
+    }
+
+    @Test
+    fun `기다리던 쪽이 취소돼도 승인한 작업은 끝까지 실행한다`() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val executor = object : StepExecutor {
+            override suspend fun execute(errand: Errand, stepIndex: Int): StepResult {
+                gate.await()
+                return StepResult.Done
+            }
+        }
+        val runner = ErrandRunner(executor, now = { now }, workScope = backgroundScope)
+        val id = runner.propose(pickup).id
+        val waiting = launch { runner.approve(id, ApprovalChannel.VOICE) }
+        testScheduler.runCurrent()
+        waiting.cancel()
+        gate.complete(Unit)
+        // backgroundScope 작업은 advanceUntilIdle이 기다리지 않으므로 예약된 작업을 직접 돌린다
+        testScheduler.runCurrent()
+        assertEquals(ErrandState.COMPLETED, runner.errands.value.single().state)
+    }
+
+    @Test
+    fun `서버 처리 뒤 실패한 작업은 되돌릴 수 있다`() = runTest {
+        val executor = object : StepExecutor {
+            override suspend fun execute(errand: Errand, stepIndex: Int) =
+                if (stepIndex == 1) StepResult.Recorded("order-1") else StepResult.Failed("내비게이션에 경유지를 넣지 못했어요")
+            override suspend fun undo(errand: Errand) = UndoResult.Undone()
+        }
+        val runner = ErrandRunner(executor, now = { now })
+        val failed = runner.approve(runner.propose(pickup).id, ApprovalChannel.TOUCH)
+        assertEquals(ErrandState.FAILED, failed.state)
+        assertTrue(failed.canUndo(now))
+        assertEquals(ErrandState.CANCELLED, runner.undo(failed.id, ApprovalChannel.TOUCH).state)
     }
 }
 

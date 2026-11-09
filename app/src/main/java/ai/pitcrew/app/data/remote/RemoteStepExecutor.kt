@@ -7,6 +7,7 @@ import ai.pitcrew.app.data.WaypointEditor
 import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.StepState
 import ai.pitcrew.app.ui.format.hhmm
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
@@ -41,7 +42,7 @@ class RemoteStepExecutor(
         val reference = errand.reference ?: return UndoResult.Failed("서버 기록이 없어 되돌릴 수 없어요")
         return try {
             when (val d = errand.detail) {
-                is ErrandDetail.LateArrival -> undoLateArrival(d, reference)
+                is ErrandDetail.LateArrival -> undoLateArrival(d, reference, notified = errand.notifiedCompanions())
                 is ErrandDetail.Pickup -> {
                     api.post("v1/orders/$reference/cancel", JSONObject())
                     UndoResult.Undone(removeWaypoint(d.store.displayName, d.store.latitude, d.store.longitude))
@@ -63,8 +64,10 @@ class RemoteStepExecutor(
             val reservationId = d.reservationId ?: return StepResult.Failed("등록된 예약이 없어요")
             val target = proposedDateTime(d)
             val updated = api.post("v1/reservations/$reservationId/reschedule", JSONObject().put("reservedAt", target.toInstantString()))
-            if (updated.getString("reservedAt").toLocalDateTime() == target) StepResult.Recorded(updated.getString("changeId"))
-            else StepResult.Failed("식당이 다른 시간으로 잡았어요")
+            val changeId = updated.getString("changeId")
+            // 다른 시각으로 잡혔어도 서버 예약은 바뀌었으므로 되돌릴 수 있게 변경 id를 남긴다
+            if (updated.getString("reservedAt").toLocalDateTime() == target) StepResult.Recorded(changeId)
+            else StepResult.Failed("식당이 다른 시간으로 잡았어요", reference = changeId)
         }
         2 -> {
             reloadReservations()
@@ -84,10 +87,10 @@ class RemoteStepExecutor(
     }
 
     // 예약을 되돌린 뒤에는 앞서 보낸 안내가 틀린 정보가 되므로 일행에게 정정 안내를 보낸다
-    private suspend fun undoLateArrival(d: ErrandDetail.LateArrival, changeId: String): UndoResult {
+    private suspend fun undoLateArrival(d: ErrandDetail.LateArrival, changeId: String, notified: Boolean): UndoResult {
         val restored = api.post("v1/reservation-changes/$changeId/revert", JSONObject())
         reloadReservations()
-        if (d.companions.isEmpty()) return UndoResult.Undone()
+        if (d.companions.isEmpty() || !notified) return UndoResult.Undone()
         val message = "PitCrew 알림 · 앞서 보낸 안내는 취소됐어요. ${d.placeName ?: "약속"} 예약은 ${restored.getString("reservedAt").toLocalDateTime().hhmm()} 그대로예요."
         val failed = try {
             notify(message, d)
@@ -135,6 +138,9 @@ class RemoteStepExecutor(
 
     private suspend fun removeWaypoint(name: String, latitude: Double, longitude: Double): String? =
         if (waypoints.remove(name, latitude, longitude)) null else MockStepExecutor.WAYPOINT_REMOVE_FAILED
+
+    // 알림 단계까지 가지 못하고 실패했다면 일행은 아무 안내도 받지 않았으므로 정정 안내도 보내지 않는다
+    private fun Errand.notifiedCompanions(): Boolean = steps.lastOrNull()?.state == StepState.DONE
 
     // 제안 시각은 시각만 있으므로 약속 날짜 기준으로 붙이고, 자정을 넘기면 다음 날로 본다
     private fun proposedDateTime(d: ErrandDetail.LateArrival): LocalDateTime {

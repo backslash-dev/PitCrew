@@ -23,7 +23,10 @@ class GleoActionDispatcher(
                 ?: return record(request, GleoResponse.fail(request.function, "This action is not supported."))
             withTimeout(timeoutMillis) { handler.handle(request) }
         } catch (e: TimeoutCancellationException) {
-            GleoResponse.fail(request.function, "A timeout occurred while processing the request.")
+            GleoResponse.fail(
+                request.function,
+                "The request took too long to finish. If it was already approved, PitCrew keeps processing it and the result is shown in the PitCrew app.",
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

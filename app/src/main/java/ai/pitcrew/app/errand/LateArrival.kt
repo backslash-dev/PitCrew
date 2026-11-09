@@ -94,7 +94,10 @@ class LateArrivalUseCase(
     private val contacts: ContactRepository,
     private val now: () -> LocalDateTime = LocalDateTime::now,
 ) {
-    /** [approvedTime]이 있으면 사용자가 그 시간으로 이미 승인한 것으로 보고 바로 실행한다. */
+    /**
+     * [approvedTime]이 있으면 사용자가 그 시간으로 승인한 것으로 보고 바로 실행한다.
+     * 단, 이 예약에 대해 먼저 물은 제안이 없으면(Gleo가 첫 요청부터 확인을 붙여 보낸 경우) 승인으로 보지 않고 다시 묻는다.
+     */
     suspend fun run(appointment: LocalTime, approvedTime: LocalTime? = null, channel: ApprovalChannel = ApprovalChannel.VOICE): LateArrivalOutcome {
         val destination = try {
             fetchDestination()
@@ -109,9 +112,13 @@ class LateArrivalUseCase(
         if (!plan.isLate) return LateArrivalOutcome.OnTime(plan, reservation)
         if (reservation == null) return LateArrivalOutcome.NoReservation(plan)
 
-        val proposedTime = approvedTime?.let { closestHalfDay(it, plan.proposedTime!!) } ?: plan.proposedTime!!
+        val asked = errands.errands.value.any {
+            it.state == ErrandState.AWAITING_APPROVAL && (it.detail as? ErrandDetail.LateArrival)?.reservationId == reservation.id
+        }
+        val approved = approvedTime?.takeIf { asked }
+        val proposedTime = approved?.let { closestHalfDay(it, plan.proposedTime!!) } ?: plan.proposedTime!!
         val errand = propose(reservation, plan, proposedTime, ErrandOrigin.REQUESTED, followUp = wasRescheduled(reservation))
-        if (approvedTime == null) return LateArrivalOutcome.AwaitingApproval(errand, plan, reservation)
+        if (approved == null) return LateArrivalOutcome.AwaitingApproval(errand, plan, reservation)
         return LateArrivalOutcome.Finished(errands.approve(errand.id, channel), plan, reservation)
     }
 

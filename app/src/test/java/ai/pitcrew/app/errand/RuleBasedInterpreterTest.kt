@@ -54,4 +54,10 @@ class RuleBasedInterpreterTest {
         assertEquals(VoiceCommand.ChargeAndDine(2), parse("둘이 충전하는 동안 밥 먹자"))
         assertEquals(VoiceCommand.ChargeAndDine(3), parse("세 명 충전하면서 식사할래"))
     }
+
+    @Test
+    fun `한 시간 늦는다는 말의 한 시를 시각으로 읽지 않는다`() {
+        assertEquals(VoiceCommand.LateArrival(LocalTime.of(7, 0)), parse("한 시간 늦을 것 같아, 7시 약속"))
+        assertEquals(VoiceCommand.LateArrivalWithoutTime, parse("한 시간쯤 늦을 듯"))
+    }
 }

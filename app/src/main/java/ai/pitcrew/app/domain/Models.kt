@@ -48,7 +48,8 @@ data class PastOrder(
     val cancelled: Boolean,
 )
 
-enum class ErrandState { AWAITING_APPROVAL, IN_PROGRESS, COMPLETED, DECLINED, FAILED, CANCELLED }
+/** EXPIRED는 승인 대기 중 답이 없어 넘어간 제안. */
+enum class ErrandState { AWAITING_APPROVAL, IN_PROGRESS, COMPLETED, DECLINED, FAILED, CANCELLED, EXPIRED }
 
 enum class ApprovalChannel { VOICE, TOUCH }
 
@@ -108,11 +109,23 @@ data class Errand(
 ) {
     val isActive: Boolean get() = state == ErrandState.AWAITING_APPROVAL || state == ErrandState.IN_PROGRESS
 
+    /** 끝났거나, 서버에서 일부 처리된 뒤 실패해 되돌릴 기록이 있는 작업. */
+    val undoable: Boolean get() = state == ErrandState.COMPLETED || (state == ErrandState.FAILED && reference != null)
+
     fun canUndo(now: LocalDateTime): Boolean =
-        state == ErrandState.COMPLETED && !undoing && finishedAt != null && Duration.between(finishedAt, now) <= UNDO_WINDOW
+        undoable && !undoing && finishedAt != null && Duration.between(finishedAt, now) <= UNDO_WINDOW
+
+    /** 답이 없는 제안을 계속 두면 지난 시각으로 실행되거나 다른 제안을 막으므로 만료시킨다. 픽업은 준비 시각이 지나면 바로 만료. */
+    fun isStale(now: LocalDateTime): Boolean {
+        if (Duration.between(createdAt, now) >= PROPOSAL_TTL) return true
+        val d = detail as? ErrandDetail.Pickup ?: return false
+        val ready = createdAt.toLocalDate().atTime(d.readyAt).let { if (it.isBefore(createdAt)) it.plusDays(1) else it }
+        return !now.isBefore(ready)
+    }
 
     companion object {
         /** 매장이 조리를 시작하기 전, 식당이 자리를 다시 내주기 전에 무를 수 있는 시간. */
         val UNDO_WINDOW: Duration = Duration.ofMinutes(3)
+        val PROPOSAL_TTL: Duration = Duration.ofMinutes(10)
     }
 }

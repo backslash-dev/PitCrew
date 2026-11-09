@@ -65,6 +65,9 @@ interface ErrandService {
 
     fun markArrivalAnnounced(id: String)
 
+    /** 답 없이 오래된 승인 대기 제안을 만료시킨다. */
+    fun expireStale()
+
     /** 방금 끝낸 작업을 되돌린다. 되돌릴 수 없는 상태면 그대로 돌려준다. */
     suspend fun undo(id: String, channel: ApprovalChannel): Errand
 }

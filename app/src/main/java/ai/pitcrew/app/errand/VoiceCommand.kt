@@ -31,7 +31,8 @@ class RuleBasedInterpreter(private val storeNames: suspend () -> List<String>) :
             "여섯" to 6, "다섯" to 5, "네" to 4, "세" to 3, "두" to 2, "한" to 1,
         )
         private val HOUR = "(\\d{1,2}|${NATIVE_HOURS.joinToString("|") { it.first }})"
-        private val TIME = Regex("(오전|아침|오후|저녁|밤)?\\s*${HOUR}\\s*시\\s*(반|(\\d{1,2})\\s*분)?")
+        // "한 시간"의 "한 시"를 1시로 읽지 않게 "시간"은 시각으로 보지 않는다
+        private val TIME = Regex("(오전|아침|오후|저녁|밤)?\\s*${HOUR}\\s*시(?!간)\\s*(반|(\\d{1,2})\\s*분)?")
         private val LATE = Regex("늦|지각")
         private val ORDER = Regex("픽업|주문|포장|사\\s*(다|가|줘)")
         private val UNDO = Regex("취소|되돌려|되돌리|없던\\s*일|물러")

@@ -4,6 +4,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GleoActionDispatcherTest {
@@ -14,7 +15,7 @@ class GleoActionDispatcherTest {
         val dispatcher = GleoActionDispatcher(mapOf(GleoFunction.NOTIFY_LATE_ARRIVAL to GleoActionHandler { awaitCancellation() }))
         val response = dispatcher.dispatch(request)
         assertEquals(GleoStatus.FAIL, response.status)
-        assertEquals("A timeout occurred while processing the request.", response.message)
+        assertTrue(response.message.startsWith("The request took too long"))
     }
 
     @Test

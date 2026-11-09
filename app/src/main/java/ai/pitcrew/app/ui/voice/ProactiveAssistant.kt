@@ -66,6 +66,7 @@ class ProactiveAssistant(
         job = scope.launch {
             while (isActive) {
                 delay(intervalMillis)
+                errands.expireStale()
                 if (periodic) runTick()
             }
         }
@@ -88,6 +89,7 @@ class ProactiveAssistant(
 
     /** 물어본 작업을 돌려준다. 묻지 않았으면 null. */
     suspend fun tick(): Errand? = tickLock.withLock {
+        errands.expireStale()
         if (!enabled.value) return null
         // 승인 대기·진행 중인 일이 있으면 겹쳐 묻지 않는다
         if (errands.errands.value.any { it.isActive }) return null

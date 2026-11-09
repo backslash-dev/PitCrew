@@ -3,7 +3,6 @@ package ai.pitcrew.app.ui.voice
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
-import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.errand.ChargeAndDineUseCase
 import ai.pitcrew.app.errand.ChargeOutcome
 import ai.pitcrew.app.errand.CommandInterpreter
@@ -14,7 +13,11 @@ import ai.pitcrew.app.errand.PickupUseCase
 import ai.pitcrew.app.errand.UndoOutcome
 import ai.pitcrew.app.errand.UndoUseCase
 import ai.pitcrew.app.errand.VoiceCommand
+import ai.pitcrew.app.ui.errand.title
 import ai.pitcrew.app.platform.SpeechSource
+import ai.pitcrew.app.data.remote.userMessage
+import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,7 +71,15 @@ class VoiceCommandController(
                 return@launch
             }
             _state.value = VoiceCommandState.Working(heard)
-            _state.value = execute(heard)
+            // 서버·내비 오류가 여기서 새면 앱 범위 코루틴이 죽고 프로세스가 끝난다
+            _state.value = try {
+                execute(heard)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "voice command failed", e)
+                VoiceCommandState.Done(heard, "처리하지 못했어요. ${e.userMessage()}", needsApproval = false)
+            }
         }
     }
 
@@ -115,12 +126,11 @@ class VoiceCommandController(
                     done("${d.charger.name}에서 충전하는 동안 ${d.restaurant.name}에 줄을 설 수 있어요. 아래 카드에서 확인하고 승인해 주세요.", needsApproval = true)
                 }
             }
-            VoiceCommand.Undo -> when (val outcome = undo.run(confirmed = true, channel = ApprovalChannel.VOICE)) {
+            // "취소"라는 말이 다른 문장에 섞여도 바로 무르지 않게, 대상만 알려 주고 화면에서 확인받는다
+            VoiceCommand.Undo -> when (val outcome = undo.run(confirmed = false, channel = ApprovalChannel.VOICE)) {
                 UndoOutcome.NothingToUndo -> done("되돌릴 수 있는 최근 작업이 없어요. 끝낸 지 ${Errand.UNDO_WINDOW.toMinutes()}분 안의 작업만 되돌릴 수 있어요.")
-                is UndoOutcome.AwaitingConfirmation -> done("되돌릴 작업을 확인해 주세요.")
-                is UndoOutcome.Finished ->
-                    if (outcome.errand.state == ErrandState.CANCELLED) done(outcome.errand.undoNote?.let { "되돌렸어요. $it" } ?: "되돌렸어요.")
-                    else done("되돌리지 못했어요. ${outcome.errand.undoNote.orEmpty()}".trim())
+                is UndoOutcome.AwaitingConfirmation -> done("“${outcome.errand.title()}” 작업을 되돌리려면 최근 목록의 되돌리기를 눌러 주세요.")
+                is UndoOutcome.Finished -> done("되돌렸어요.")
             }
             VoiceCommand.Unknown -> done("어떤 일을 할지 알아듣지 못했어요. 지각 대응, 픽업 주문, 충전, 되돌리기를 말해 주세요.")
         }
@@ -128,5 +138,6 @@ class VoiceCommandController(
 
     private companion object {
         const val LISTEN_TIMEOUT_MILLIS = 10_000L
+        const val TAG = "VoiceCommandController"
     }
 }

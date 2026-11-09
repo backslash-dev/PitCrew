@@ -6,7 +6,10 @@ import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.testing.FakeWaypoints
 import ai.pitcrew.app.data.mock.MockStoreCatalog
+import ai.pitcrew.app.data.StoreCatalog
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.Store
+import java.io.IOException
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.data.mock.MockChargerCatalog
 import ai.pitcrew.app.errand.ChargeAndDineUseCase
@@ -43,7 +46,7 @@ class VoiceCommandControllerTest {
     private val errands = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }, stepDelayMillis = 0)
     private val speech = FakeSpeech()
 
-    private fun controller(scope: CoroutineScope) = VoiceCommandController(
+    private fun controller(scope: CoroutineScope, stores: StoreCatalog = MockStoreCatalog()) = VoiceCommandController(
         speech = speech,
         interpreter = RuleBasedInterpreter { emptyList() },
         lateArrival = LateArrivalUseCase(
@@ -52,7 +55,7 @@ class VoiceCommandControllerTest {
             InMemoryReservationRepository(listOf(Reservation("r1", "온담 한식당", LocalDateTime.of(2026, 11, 5, 19, 0), 2, emptyList()))),
             InMemoryContactRepository(),
         ) { now },
-        pickup = PickupUseCase({ route }, MockStoreCatalog(), errands) { now },
+        pickup = PickupUseCase({ route }, stores, errands) { now },
         charging = ChargeAndDineUseCase({ route }, MockChargerCatalog(), { 18 }, errands) { now },
         undo = UndoUseCase(errands) { now },
         scope = scope,
@@ -93,5 +96,19 @@ class VoiceCommandControllerTest {
         c.cancel()
         assertEquals(VoiceCommandState.Idle, c.state.value)
         assertTrue(speech.stopped >= 1)
+    }
+
+    @Test
+    fun `서버에 연결하지 못해도 앱이 죽지 않고 안내한다`() = runTest {
+        val offline = object : StoreCatalog {
+            override suspend fun findOnRoute(storeName: String?): Store? = throw IOException("connect failed")
+            override suspend fun candidatesOnRoute(): List<Store> = throw IOException("connect failed")
+        }
+        val c = controller(backgroundScope, offline)
+        c.start()
+        runCurrent()
+        speech.result.value = SpeechResult("아메리카노 픽업해줘", true)
+        runCurrent()
+        assertEquals("처리하지 못했어요. 서버에 연결하지 못했어요", (c.state.value as VoiceCommandState.Done).message)
     }
 }
