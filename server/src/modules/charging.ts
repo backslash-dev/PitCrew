@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
 import type { RowDataPacket } from 'mysql2/promise';
 import { z } from 'zod';
+import { gatewayFailure, withTimeout } from '../adapters/timeout.js';
 import { HttpError, notFound } from '../http/errors.js';
+import { idempotent, saveResult } from '../http/idempotency.js';
 import { idSchema } from '../http/validation.js';
-import type { Deps } from './deps.js';
+import { DEFAULT_GATEWAY_TIMEOUT_MS, type Deps } from './deps.js';
 
 const WaitlistBody = z.object({
   restaurantId: z.string().min(1).max(64),
@@ -50,8 +52,11 @@ const waitlistJson = (row: Pick<WaitlistRow, 'id' | 'restaurant_id' | 'party_siz
   status: row.status,
 });
 
-/** 경로상 충전소와 걸어갈 수 있는 식당, 식당 원격 줄서기. 실제 충전소·줄서기 API 전까지 카탈로그와 목업 게이트웨이로 동작한다. */
-export const chargingRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways }) => {
+/**
+ * 경로상 충전소와 걸어갈 수 있는 식당, 식당 원격 줄서기. 실제 충전소·줄서기 API 전까지 카탈로그와 목업 게이트웨이로 동작한다.
+ * 줄서기 상태: PENDING → WAITING | REJECTED | UNKNOWN, WAITING → CANCELLING → CANCELLED.
+ */
+export const chargingRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways, gatewayTimeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS }) => {
   app.get('/chargers', async () => {
     const [chargers] = await db.query<ChargerRow[]>(
       'SELECT id, name, latitude, longitude, detour_minutes, power_kw, available_stalls FROM chargers WHERE active = 1 ORDER BY detour_minutes, id',
@@ -83,52 +88,89 @@ export const chargingRoutes: FastifyPluginAsync<Deps> = async (app, { db, gatewa
     );
     const restaurant = rows[0];
     if (!restaurant) throw notFound('식당');
-    const result = await gateways.waitlists.register({
-      restaurantName: restaurant.name,
-      partySize: body.partySize,
-      expectedWaitMinutes: restaurant.wait_minutes,
+
+    return idempotent(db, request, reply, 'waitlists', async () => {
+      const id = randomUUID();
+      await db.execute(
+        'INSERT INTO waitlists (id, restaurant_id, party_size, queue_position, wait_minutes, status, provider) VALUES (?, ?, ?, 0, 0, ?, ?)',
+        [id, restaurant.id, body.partySize, 'PENDING', gateways.waitlists.provider],
+      );
+      let result;
+      try {
+        result = await withTimeout(
+          gateways.waitlists.register({ restaurantName: restaurant.name, partySize: body.partySize, expectedWaitMinutes: restaurant.wait_minutes }),
+          gatewayTimeoutMs,
+        );
+      } catch (error) {
+        request.log.warn({ err: error, waitlistId: id }, 'waitlist gateway failed');
+        await setStatus(id, 'UNKNOWN', 'gateway failure or timeout');
+        throw gatewayFailure(error, '식당 줄서기');
+      }
+      if (!result.accepted) {
+        await setStatus(id, 'REJECTED', result.reason);
+        throw new HttpError(409, 'WAITLIST_REJECTED', result.reason);
+      }
+      await saveResult(
+        () => db.execute("UPDATE waitlists SET status = 'WAITING', queue_position = ?, wait_minutes = ? WHERE id = ?", [result.position, result.waitMinutes, id]),
+        '줄서기는 등록됐을 수 있지만 결과를 저장하지 못했습니다',
+      );
+      return {
+        status: 201,
+        body: waitlistJson({ id, restaurant_id: restaurant.id, party_size: body.partySize, queue_position: result.position, wait_minutes: result.waitMinutes, status: 'WAITING' }),
+      };
     });
-    if (!result.accepted) throw new HttpError(409, 'WAITLIST_REJECTED', result.reason);
-    const id = randomUUID();
-    await db.execute(
-      'INSERT INTO waitlists (id, restaurant_id, party_size, queue_position, wait_minutes, status, provider) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [id, restaurant.id, body.partySize, result.position, result.waitMinutes, 'WAITING', gateways.waitlists.provider],
-    );
-    return reply.status(201).send(
-      waitlistJson({
-        id,
-        restaurant_id: restaurant.id,
-        party_size: body.partySize,
-        queue_position: result.position,
-        wait_minutes: result.waitMinutes,
-        status: 'WAITING',
-      }),
-    );
   });
 
+  /** 이미 취소된 줄서기를 다시 취소하면(응답 유실 뒤 재시도) 성공으로 본다. */
   app.post('/waitlists/:id/cancel', async (request) => {
     const { id } = Params.parse(request.params);
+    const waitlist = await claim(id);
+    if (waitlist.status === 'CANCELLED') return waitlistJson(waitlist);
+
+    let result;
+    try {
+      result = await withTimeout(gateways.waitlists.cancel({ restaurantName: waitlist.restaurant_name, registeredAt: waitlist.created_at }), gatewayTimeoutMs);
+    } catch (error) {
+      request.log.warn({ err: error, waitlistId: id }, 'waitlist cancel gateway failed');
+      await setStatus(id, 'CANCEL_UNKNOWN', 'gateway failure or timeout');
+      throw gatewayFailure(error, '식당 줄서기');
+    }
+    if (!result.accepted) {
+      await setStatus(id, 'WAITING', null);
+      throw new HttpError(409, 'CANCEL_REJECTED', result.reason);
+    }
+    await saveResult(
+      () => db.execute("UPDATE waitlists SET status = 'CANCELLED', cancelled_at = CURRENT_TIMESTAMP(3), failure = NULL WHERE id = ?", [id]),
+      '줄서기는 취소됐을 수 있지만 결과를 저장하지 못했습니다',
+    );
+    return waitlistJson({ ...waitlist, status: 'CANCELLED' });
+  });
+
+  async function claim(id: string): Promise<WaitlistRow> {
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
       const [rows] = await connection.execute<WaitlistRow[]>(
         `SELECT w.id, w.restaurant_id, r.name AS restaurant_name, w.party_size, w.queue_position, w.wait_minutes, w.status, w.created_at
-         FROM waitlists w JOIN charger_restaurants r ON r.id = w.restaurant_id WHERE w.id = ? FOR UPDATE`,
+         FROM waitlists w JOIN charger_restaurants r ON r.id = w.restaurant_id WHERE w.id = ? FOR UPDATE OF w`,
         [id],
       );
       const waitlist = rows[0];
       if (!waitlist) throw notFound('줄서기');
-      if (waitlist.status !== 'WAITING') throw new HttpError(409, 'NOT_CANCELLABLE', '취소할 수 있는 줄서기가 아닙니다');
-      const result = await gateways.waitlists.cancel({ restaurantName: waitlist.restaurant_name, registeredAt: waitlist.created_at });
-      if (!result.accepted) throw new HttpError(409, 'CANCEL_REJECTED', result.reason);
-      await connection.execute("UPDATE waitlists SET status = 'CANCELLED', cancelled_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [id]);
+      if (waitlist.status === 'CANCELLING') throw new HttpError(409, 'IN_PROGRESS', '이 줄서기의 취소를 처리하는 중입니다');
+      if (waitlist.status !== 'WAITING' && waitlist.status !== 'CANCELLED') throw new HttpError(409, 'NOT_CANCELLABLE', '취소할 수 있는 줄서기가 아닙니다');
+      if (waitlist.status === 'WAITING') await connection.execute("UPDATE waitlists SET status = 'CANCELLING' WHERE id = ?", [id]);
       await connection.commit();
-      return waitlistJson({ ...waitlist, status: 'CANCELLED' });
+      return waitlist;
     } catch (error) {
       await connection.rollback().catch(() => {});
       throw error;
     } finally {
       connection.release();
     }
-  });
+  }
+
+  async function setStatus(id: string, status: string, failure: string | null) {
+    await db.execute('UPDATE waitlists SET status = ?, failure = ? WHERE id = ?', [status, failure?.slice(0, 255) ?? null, id]);
+  }
 };

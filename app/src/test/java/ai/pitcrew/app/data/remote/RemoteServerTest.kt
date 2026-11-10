@@ -167,4 +167,22 @@ class RemoteServerTest {
         assertEquals("""{"restaurantId":"cr-sobok-yangjae","partySize":2}""", server.takeRequest().body.readUtf8())
         assertEquals("/v1/waitlists/w-1/cancel", server.takeRequest().path)
     }
+
+    @Test
+    fun `서버 요청에는 작업과 단계로 정한 중복 방지 키를 붙인다`() = runTest {
+        respond(201, """{"id":"o-1","status":"ACCEPTED"}""")
+        val pickup = ErrandDetail.Pickup("아메리카노", MockStoreCatalog.DEFAULT_STORES.first(), LocalTime.of(23, 30))
+        val executor = RemoteStepExecutor(api, reloadReservations = {}, waypoints = FakeWaypoints()) { now }
+        executor.execute(errand(pickup), 1)
+        assertEquals("e1-1", server.takeRequest().getHeader("Idempotency-Key"))
+    }
+
+    @Test
+    fun `접수되지 않은 주문은 단골 판단에서 빠지도록 취소로 본다`() = runTest {
+        respond(200, """{"orders":[
+            {"storeId":"s1","storeName":"세모 커피 역삼점","item":"라테","pickupAt":"2026-11-04T09:00:00Z","status":"ACCEPTED"},
+            {"storeId":"s1","storeName":"세모 커피 역삼점","item":"라테","pickupAt":"2026-11-03T09:00:00Z","status":"UNKNOWN"},
+            {"storeId":"s1","storeName":"세모 커피 역삼점","item":"라테","pickupAt":"2026-11-02T09:00:00Z","status":"REJECTED"}]}""")
+        assertEquals(listOf(false, true, true), RemoteOrderHistory(api).recent().map { it.cancelled })
+    }
 }

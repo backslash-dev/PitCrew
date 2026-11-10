@@ -4,7 +4,9 @@ import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/prom
 import { z } from 'zod';
 import { HttpError, notFound } from '../http/errors.js';
 import { idSchema, instantSchema } from '../http/validation.js';
-import type { Deps } from './deps.js';
+import { gatewayFailure, withTimeout } from '../adapters/timeout.js';
+import { idempotent, saveResult } from '../http/idempotency.js';
+import { DEFAULT_GATEWAY_TIMEOUT_MS, type Deps } from './deps.js';
 
 const ReservationBody = z.object({
   placeName: z.string().trim().min(1).max(100),
@@ -48,7 +50,7 @@ async function findReservation(db: Deps['db'] | PoolConnection, id: string) {
   return rows[0] ? toJson(rows[0]) : null;
 }
 
-export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways }) => {
+export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways, gatewayTimeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS }) => {
   app.get('/reservations', async () => {
     const [rows] = await db.execute<ReservationRow[]>(`${SELECT_RESERVATIONS} GROUP BY r.id ORDER BY r.reserved_at`);
     return { reservations: rows.map(toJson) };
@@ -77,7 +79,7 @@ export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gat
       await connection.commit();
       return await findReservation(connection, id);
     } catch (error) {
-      await connection.rollback();
+      await connection.rollback().catch(() => {});
       throw error;
     } finally {
       connection.release();
@@ -91,56 +93,80 @@ export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gat
     return reply.status(204).send();
   });
 
-  /** 식당에 시간 변경을 요청하고, 받아들여지면 예약 시각을 바꾼다. 요청 결과는 성패와 관계없이 남긴다. */
-  app.post('/reservations/:id/reschedule', async (request) => {
+  /**
+   * 식당에 시간 변경을 요청하고, 받아들여지면 예약 시각을 바꾼다. 변경 상태: REQUESTED → ACCEPTED | REJECTED | UNKNOWN | CONFLICT.
+   * 식당 호출은 트랜잭션 밖에서 하고 앞뒤로 기록해, 식당과 DB가 어긋나도 이력이 남는다.
+   */
+  app.post('/reservations/:id/reschedule', async (request, reply) => {
     const { id } = Params.parse(request.params);
     const { reservedAt } = RescheduleBody.parse(request.body);
-    const connection = await db.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [rows] = await connection.execute<ReservationRow[]>(
-        'SELECT id, place_name, reserved_at, party_size FROM reservations WHERE id = ? FOR UPDATE',
-        [id],
-      );
-      const current = rows[0];
-      if (!current) throw notFound('예약');
-      const result = await gateways.restaurants.requestReschedule({
-        placeName: current.place_name,
-        from: current.reserved_at,
-        to: reservedAt,
-        partySize: current.party_size,
-      });
+    return idempotent(db, request, reply, 'reschedule', async () => {
       const changeId = randomUUID();
-      await connection.execute(
-        'INSERT INTO reservation_changes (id, reservation_id, previous_at, requested_at, status, provider) VALUES (?, ?, ?, ?, ?, ?)',
-        [changeId, id, current.reserved_at, reservedAt, result.accepted ? 'ACCEPTED' : 'REJECTED', gateways.restaurants.provider],
+      const current = await inTransaction(async (connection) => {
+        const [rows] = await connection.execute<ReservationRow[]>(
+          'SELECT id, place_name, reserved_at, party_size FROM reservations WHERE id = ? FOR UPDATE',
+          [id],
+        );
+        const row = rows[0];
+        if (!row) throw notFound('예약');
+        await connection.execute(
+          "INSERT INTO reservation_changes (id, reservation_id, previous_at, requested_at, status, provider) VALUES (?, ?, ?, ?, 'REQUESTED', ?)",
+          [changeId, id, row.reserved_at, reservedAt, gateways.restaurants.provider],
+        );
+        return row;
+      });
+
+      let result;
+      try {
+        result = await withTimeout(
+          gateways.restaurants.requestReschedule({ placeName: current.place_name, from: current.reserved_at, to: reservedAt, partySize: current.party_size }),
+          gatewayTimeoutMs,
+        );
+      } catch (error) {
+        request.log.warn({ err: error, changeId }, 'restaurant reschedule gateway failed');
+        await setChangeStatus(changeId, 'UNKNOWN');
+        throw gatewayFailure(error, '식당');
+      }
+      if (!result.accepted) {
+        await setChangeStatus(changeId, 'REJECTED');
+        throw new HttpError(409, 'RESCHEDULE_REJECTED', result.reason);
+      }
+
+      await saveResult(
+        () =>
+          inTransaction(async (connection) => {
+            const [rows] = await connection.execute<ReservationRow[]>('SELECT reserved_at FROM reservations WHERE id = ? FOR UPDATE', [id]);
+            // 식당을 기다리는 사이 앱에서 예약을 고쳤다면 덮어쓰지 않는다
+            if (!rows[0] || rows[0].reserved_at.getTime() !== current.reserved_at.getTime()) {
+              await connection.execute("UPDATE reservation_changes SET status = 'CONFLICT' WHERE id = ?", [changeId]);
+              return;
+            }
+            await connection.execute("UPDATE reservation_changes SET status = 'ACCEPTED' WHERE id = ?", [changeId]);
+            await connection.execute('UPDATE reservations SET reserved_at = ? WHERE id = ?', [reservedAt, id]);
+          }),
+        '식당은 변경을 받았을 수 있지만 결과를 저장하지 못했습니다',
       );
-      if (result.accepted) await connection.execute('UPDATE reservations SET reserved_at = ? WHERE id = ?', [reservedAt, id]);
-      await connection.commit();
-      if (!result.accepted) throw new HttpError(409, 'RESCHEDULE_REJECTED', result.reason);
-      return { ...(await findReservation(db, id)), changeId };
-    } catch (error) {
-      await connection.rollback().catch(() => {});
-      throw error;
-    } finally {
-      connection.release();
-    }
+      const [changes] = await db.execute<ChangeRow[]>('SELECT status FROM reservation_changes WHERE id = ?', [changeId]);
+      if (changes[0]?.status === 'CONFLICT') throw new HttpError(409, 'CHANGED_SINCE', '요청하는 동안 예약이 바뀌어 반영하지 않았습니다');
+      return { status: 200, body: { ...(await findReservation(db, id)), changeId } };
+    });
   });
 
   /**
    * 받아들여진 변경을 무르고 원래 시각으로 되돌린다. 그 뒤로 예약이 다시 바뀌었으면 엉뚱한 시각으로 돌아가지 않게 거절한다.
+   * 이미 되돌린 변경을 다시 요청하면(응답 유실 뒤 재시도) 현재 예약을 그대로 돌려준다.
    */
   app.post('/reservation-changes/:id/revert', async (request) => {
     const { id } = Params.parse(request.params);
-    const connection = await db.getConnection();
-    try {
-      await connection.beginTransaction();
+    const claimed = await inTransaction(async (connection) => {
       const [changes] = await connection.execute<ChangeRow[]>(
         'SELECT id, reservation_id, previous_at, requested_at, status FROM reservation_changes WHERE id = ? FOR UPDATE',
         [id],
       );
       const change = changes[0];
       if (!change) throw notFound('예약 변경');
+      if (change.status === 'REVERTED') return { change, current: null };
+      if (change.status === 'REVERTING') throw new HttpError(409, 'IN_PROGRESS', '이 변경을 되돌리는 중입니다');
       if (change.status !== 'ACCEPTED') throw new HttpError(409, 'NOT_REVERTIBLE', '되돌릴 수 있는 변경이 아닙니다');
       const [rows] = await connection.execute<ReservationRow[]>(
         'SELECT id, place_name, reserved_at, party_size FROM reservations WHERE id = ? FOR UPDATE',
@@ -151,22 +177,54 @@ export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gat
       if (current.reserved_at.getTime() !== change.requested_at.getTime()) {
         throw new HttpError(409, 'CHANGED_SINCE', '그 뒤로 예약이 다시 바뀌어 되돌릴 수 없습니다');
       }
-      const result = await gateways.restaurants.revertReschedule({
-        placeName: current.place_name,
-        current: current.reserved_at,
-        restoreTo: change.previous_at,
-        partySize: current.party_size,
-      });
-      if (!result.accepted) throw new HttpError(409, 'REVERT_REJECTED', result.reason);
-      await connection.execute("UPDATE reservation_changes SET status = 'REVERTED', reverted_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [id]);
-      await connection.execute('UPDATE reservations SET reserved_at = ? WHERE id = ?', [change.previous_at, current.id]);
+      await connection.execute("UPDATE reservation_changes SET status = 'REVERTING' WHERE id = ?", [id]);
+      return { change, current };
+    });
+    const { change, current } = claimed;
+    if (current === null) return await findReservation(db, change.reservation_id);
+
+    let result;
+    try {
+      result = await withTimeout(
+        gateways.restaurants.revertReschedule({ placeName: current.place_name, current: current.reserved_at, restoreTo: change.previous_at, partySize: current.party_size }),
+        gatewayTimeoutMs,
+      );
+    } catch (error) {
+      request.log.warn({ err: error, changeId: id }, 'restaurant revert gateway failed');
+      await setChangeStatus(id, 'REVERT_UNKNOWN');
+      throw gatewayFailure(error, '식당');
+    }
+    if (!result.accepted) {
+      await setChangeStatus(id, 'ACCEPTED');
+      throw new HttpError(409, 'REVERT_REJECTED', result.reason);
+    }
+    await saveResult(
+      () =>
+        inTransaction(async (connection) => {
+          await connection.execute("UPDATE reservation_changes SET status = 'REVERTED', reverted_at = CURRENT_TIMESTAMP(3) WHERE id = ?", [id]);
+          await connection.execute('UPDATE reservations SET reserved_at = ? WHERE id = ?', [change.previous_at, change.reservation_id]);
+        }),
+      '식당은 되돌렸을 수 있지만 결과를 저장하지 못했습니다',
+    );
+    return await findReservation(db, change.reservation_id);
+  });
+
+  async function setChangeStatus(id: string, status: string) {
+    await db.execute('UPDATE reservation_changes SET status = ? WHERE id = ?', [status, id]);
+  }
+
+  async function inTransaction<T>(work: (connection: PoolConnection) => Promise<T>): Promise<T> {
+    const connection = await db.getConnection();
+    try {
+      await connection.beginTransaction();
+      const result = await work(connection);
       await connection.commit();
-      return await findReservation(db, current.id);
+      return result;
     } catch (error) {
       await connection.rollback().catch(() => {});
       throw error;
     } finally {
       connection.release();
     }
-  });
+  }
 };

@@ -28,9 +28,9 @@ class RemoteStepExecutor(
 ) : StepExecutor {
     override suspend fun execute(errand: Errand, stepIndex: Int): StepResult = try {
         when (val d = errand.detail) {
-            is ErrandDetail.LateArrival -> lateArrival(d, stepIndex)
-            is ErrandDetail.Pickup -> pickup(d, stepIndex)
-            is ErrandDetail.ChargeAndDine -> chargeAndDine(d, stepIndex)
+            is ErrandDetail.LateArrival -> lateArrival(d, stepIndex, key(errand, stepIndex))
+            is ErrandDetail.Pickup -> pickup(d, stepIndex, key(errand, stepIndex))
+            is ErrandDetail.ChargeAndDine -> chargeAndDine(d, stepIndex, key(errand, stepIndex))
         }
     } catch (e: CancellationException) {
         throw e
@@ -38,11 +38,15 @@ class RemoteStepExecutor(
         StepResult.Failed(e.userMessage())
     }
 
+    // 작업·단계마다 고정된 키라 같은 단계를 다시 보내면 서버가 처음 결과를 돌려준다
+    private fun key(errand: Errand, step: String) = "${errand.id}-$step"
+    private fun key(errand: Errand, stepIndex: Int) = key(errand, stepIndex.toString())
+
     override suspend fun undo(errand: Errand): UndoResult {
         val reference = errand.reference ?: return UndoResult.Failed("서버 기록이 없어 되돌릴 수 없어요")
         return try {
             when (val d = errand.detail) {
-                is ErrandDetail.LateArrival -> undoLateArrival(d, reference, notified = errand.notifiedCompanions())
+                is ErrandDetail.LateArrival -> undoLateArrival(d, reference, notified = errand.notifiedCompanions(), key = key(errand, "undo-notify"))
                 is ErrandDetail.Pickup -> {
                     api.post("v1/orders/$reference/cancel", JSONObject())
                     UndoResult.Undone(removeWaypoint(d.store.displayName, d.store.latitude, d.store.longitude))
@@ -59,11 +63,11 @@ class RemoteStepExecutor(
         }
     }
 
-    private suspend fun lateArrival(d: ErrandDetail.LateArrival, stepIndex: Int): StepResult = when (stepIndex) {
+    private suspend fun lateArrival(d: ErrandDetail.LateArrival, stepIndex: Int, key: String): StepResult = when (stepIndex) {
         1 -> {
             val reservationId = d.reservationId ?: return StepResult.Failed("등록된 예약이 없어요")
             val target = proposedDateTime(d)
-            val updated = api.post("v1/reservations/$reservationId/reschedule", JSONObject().put("reservedAt", target.toInstantString()))
+            val updated = api.post("v1/reservations/$reservationId/reschedule", JSONObject().put("reservedAt", target.toInstantString()), key)
             val changeId = updated.getString("changeId")
             // 다른 시각으로 잡혔어도 서버 예약은 바뀌었으므로 되돌릴 수 있게 변경 id를 남긴다
             if (updated.getString("reservedAt").toLocalDateTime() == target) StepResult.Recorded(changeId)
@@ -80,20 +84,20 @@ class RemoteStepExecutor(
             } else {
                 "PitCrew 알림 · $place 예약을 ${d.proposedTime.hhmm()}에 다시 잡았어요. 도착 예정 ${d.estimatedArrival.hhmm()}."
             }
-            val failed = notify(message, d)
+            val failed = notify(message, d, key)
             if (failed == 0) StepResult.Done else StepResult.Failed("${failed}명에게 알림을 보내지 못했어요")
         }
         else -> StepResult.Done
     }
 
     // 예약을 되돌린 뒤에는 앞서 보낸 안내가 틀린 정보가 되므로 일행에게 정정 안내를 보낸다
-    private suspend fun undoLateArrival(d: ErrandDetail.LateArrival, changeId: String, notified: Boolean): UndoResult {
+    private suspend fun undoLateArrival(d: ErrandDetail.LateArrival, changeId: String, notified: Boolean, key: String): UndoResult {
         val restored = api.post("v1/reservation-changes/$changeId/revert", JSONObject())
         reloadReservations()
         if (d.companions.isEmpty() || !notified) return UndoResult.Undone()
         val message = "PitCrew 알림 · 앞서 보낸 안내는 취소됐어요. ${d.placeName ?: "약속"} 예약은 ${restored.getString("reservedAt").toLocalDateTime().hhmm()} 그대로예요."
         val failed = try {
-            notify(message, d)
+            notify(message, d, key)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -102,11 +106,12 @@ class RemoteStepExecutor(
         return UndoResult.Undone(if (failed == 0) null else "예약은 되돌렸지만 일행 ${failed}명에게 정정 안내를 보내지 못했어요")
     }
 
-    private suspend fun pickup(d: ErrandDetail.Pickup, stepIndex: Int): StepResult = when (stepIndex) {
+    private suspend fun pickup(d: ErrandDetail.Pickup, stepIndex: Int, key: String): StepResult = when (stepIndex) {
         1 -> {
             val order = api.post(
                 "v1/orders",
                 JSONObject().put("storeId", d.store.id).put("item", d.item).put("pickupAt", nextOccurrence(d.readyAt).toInstantString()),
+                key,
             )
             StepResult.Recorded(order.getString("id"))
         }
@@ -115,9 +120,9 @@ class RemoteStepExecutor(
         else -> StepResult.Done
     }
 
-    private suspend fun chargeAndDine(d: ErrandDetail.ChargeAndDine, stepIndex: Int): StepResult = when (stepIndex) {
+    private suspend fun chargeAndDine(d: ErrandDetail.ChargeAndDine, stepIndex: Int, key: String): StepResult = when (stepIndex) {
         1 -> {
-            val waitlist = api.post("v1/waitlists", JSONObject().put("restaurantId", d.restaurant.id).put("partySize", d.partySize))
+            val waitlist = api.post("v1/waitlists", JSONObject().put("restaurantId", d.restaurant.id).put("partySize", d.partySize), key)
             StepResult.Recorded(waitlist.getString("id"))
         }
         2 -> addWaypoint(d.charger.name, d.charger.latitude, d.charger.longitude)
@@ -125,10 +130,11 @@ class RemoteStepExecutor(
     }
 
     /** 실패한 받는 사람 수를 돌려준다. */
-    private suspend fun notify(message: String, d: ErrandDetail.LateArrival): Int {
+    private suspend fun notify(message: String, d: ErrandDetail.LateArrival, key: String): Int {
         val results = api.post(
             "v1/notifications",
             JSONObject().put("message", message).put("contactIds", JSONArray(d.companions.map { it.id })),
+            key,
         ).getJSONArray("results").objects()
         return results.count { it.getString("status") != "SENT" }
     }

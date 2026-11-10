@@ -35,10 +35,12 @@
                 android:value="true" />
         </activity>
 
-        <!-- 문서 표기(함수명)와 에뮬레이터 Gleo 실제 전송(패키지명.함수명)을 모두 받는다 -->
+        <!-- 문서 표기(함수명)와 에뮬레이터 Gleo 실제 전송(패키지명.함수명)을 모두 받는다.
+             Gleo만 가진 서명 권한을 요구해 다른 앱이 주문·문자 같은 명령을 보내지 못하게 한다 -->
         <receiver
             android:name=".gleo.GleoActionReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:permission="ai.umos.gleo.permission.APP_ACTION">
             <intent-filter>
                 <action android:name="NOTIFY_LATE_ARRIVAL" />
                 <action android:name="ai.pitcrew.app.NOTIFY_LATE_ARRIVAL" />

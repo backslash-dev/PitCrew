@@ -6,8 +6,9 @@ export class HttpError extends Error {
     readonly statusCode: number,
     readonly code: string,
     message: string,
+    cause?: unknown,
   ) {
-    super(message);
+    super(message, { cause });
   }
 }
 
@@ -17,6 +18,7 @@ export const notFound = (what: string) => new HttpError(404, 'NOT_FOUND', `${wha
 export function registerErrorHandler(app: FastifyInstance) {
   app.setErrorHandler((error: FastifyError | Error, request, reply) => {
     if (error instanceof HttpError) {
+      if (error.statusCode >= 500) request.log.error(error, error.code);
       return reply.status(error.statusCode).send({ error: { code: error.code, message: error.message } });
     }
     if (error instanceof z.ZodError) {

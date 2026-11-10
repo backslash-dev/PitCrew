@@ -32,7 +32,9 @@ class PitCrewApi(
 
     suspend fun put(path: String, body: JSONObject): JSONObject = send(request(path).put(body.toRequestBody()))
 
-    suspend fun post(path: String, body: JSONObject): JSONObject = send(request(path).post(body.toRequestBody()))
+    /** [idempotencyKey]가 있으면 응답을 잃고 다시 보내도 서버가 같은 일을 두 번 하지 않는다. */
+    suspend fun post(path: String, body: JSONObject, idempotencyKey: String? = null): JSONObject =
+        send(request(path).post(body.toRequestBody()).apply { if (idempotencyKey != null) header("Idempotency-Key", idempotencyKey) })
 
     suspend fun delete(path: String): JSONObject = send(request(path).delete())
 

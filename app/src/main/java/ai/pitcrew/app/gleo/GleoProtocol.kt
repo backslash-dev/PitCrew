@@ -80,9 +80,11 @@ data class GleoResponse(
 
 object GleoCallback {
     private const val ACTION_RESPONSE = "ai.pleos.playground.intent.action.APP_ACTION_RESPONSE"
+    /** Gleo(ai.umos.ambientai)가 정의한 서명 권한. 응답에 예약·주문 내용이 담기므로 Gleo만 받게 한다. */
+    const val GLEO_PERMISSION = "ai.umos.gleo.permission.APP_ACTION"
     private const val TAG = "GleoCallback"
 
-    // Gleo는 런타임 등록 수신기로 받으므로 패키지를 지정하지 않는다. 실차의 Gleo 패키지명이 다를 수 있다
+    // Gleo는 런타임 등록 수신기로 받으므로 패키지를 지정하지 않고, 받는 쪽 권한으로 제한한다
     fun send(context: Context, response: GleoResponse) {
         val payload = response.toJson().toString()
         runCatching {
@@ -90,6 +92,7 @@ object GleoCallback {
                 Intent(ACTION_RESPONSE)
                     .putExtra("packageName", context.packageName)
                     .putExtra("response", payload),
+                GLEO_PERMISSION,
             )
         }.onSuccess {
             Log.i(TAG, "sent $payload")

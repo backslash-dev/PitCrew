@@ -99,7 +99,7 @@ describe('예약', () => {
     const [rows] = await ctx.db.query('SELECT status FROM reservation_changes WHERE reservation_id = ?', [id]);
     expect(rows).toEqual([{ status: 'REJECTED' }]);
   });
-  it('받아들여진 변경을 되돌리면 원래 시각으로 돌아가고 두 번은 못 되돌린다', async () => {
+  it('받아들여진 변경을 되돌리면 원래 시각으로 돌아가고 다시 요청해도 결과가 같다', async () => {
     const id = randomUUID();
     await put(`/v1/reservations/${id}`, { placeName: '온담 한식당', reservedAt: '2026-11-05T10:00:00Z', partySize: 2 });
     const { changeId } = (await post(`/v1/reservations/${id}/reschedule`, { reservedAt: '2026-11-05T10:30:00Z' })).json();
@@ -109,7 +109,10 @@ describe('예약', () => {
     expect(reverted.json().reservedAt).toBe('2026-11-05T10:00:00.000Z');
     const [rows] = await ctx.db.query('SELECT status FROM reservation_changes WHERE id = ?', [changeId]);
     expect(rows).toEqual([{ status: 'REVERTED' }]);
-    expect((await post(`/v1/reservation-changes/${changeId}/revert`, {})).json().error.code).toBe('NOT_REVERTIBLE');
+    // 응답을 잃고 다시 보낸 경우라 성공으로 보고 현재 예약을 돌려준다
+    const again = await post(`/v1/reservation-changes/${changeId}/revert`, {});
+    expect(again.statusCode).toBe(200);
+    expect(again.json().reservedAt).toBe('2026-11-05T10:00:00.000Z');
   });
 
   it('그 뒤로 예약이 또 바뀌었으면 앞선 변경은 되돌리지 않는다', async () => {
@@ -157,13 +160,13 @@ describe('매장·주문', () => {
     expect(orders[1]).toMatchObject({ storeId: 's-semo-yeoksam', storeName: '세모 커피 역삼점', status: 'ACCEPTED' });
   });
 
-  it('조리 전 주문은 취소하고 같은 주문을 다시 취소하면 409', async () => {
+  it('조리 전 주문은 취소하고 같은 주문을 다시 취소해도 결과가 같다', async () => {
     const pickupAt = new Date(Date.now() + 30 * 60_000).toISOString();
     const { id } = (await post('/v1/orders', { storeId: 's-semo-yeoksam', item: '아메리카노', pickupAt })).json();
     const res = await post(`/v1/orders/${id}/cancel`, {});
     expect(res.statusCode).toBe(200);
     expect(res.json().status).toBe('CANCELLED');
-    expect((await post(`/v1/orders/${id}/cancel`, {})).json().error.code).toBe('NOT_CANCELLABLE');
+    expect((await post(`/v1/orders/${id}/cancel`, {})).json().status).toBe('CANCELLED');
   });
 
   it('매장이 조리를 시작한 뒤에는 취소를 거절한다', async () => {
@@ -215,7 +218,7 @@ describe('충전·줄서기', () => {
     expect(res.json()).toMatchObject({ restaurantId: 'cr-sobok-yangjae', partySize: 2, position: 3, waitMinutes: 15, status: 'WAITING' });
     const cancelled = await post(`/v1/waitlists/${res.json().id}/cancel`, {});
     expect(cancelled.json().status).toBe('CANCELLED');
-    expect((await post(`/v1/waitlists/${res.json().id}/cancel`, {})).statusCode).toBe(409);
+    expect((await post(`/v1/waitlists/${res.json().id}/cancel`, {})).json().status).toBe('CANCELLED');
   });
 
   it('없는 식당은 404', async () => {

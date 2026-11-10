@@ -23,7 +23,11 @@ cd server && pnpm install && pnpm db:up && pnpm seed && pnpm dev
 
 - 서버는 기본 `127.0.0.1:3000`에서 뜨고, debug 앱은 에뮬레이터 안에서 `http://10.0.2.2:3000`으로 붙는다. 서버 주소를 비우면(`-Ppitcrew.serverUrl=`) 앱 안 목업으로 동작한다.
 - DB는 Docker의 MySQL 8.4(호스트 3308)다. 서버가 뜰 때 `migrations/`를 순서대로 적용하고, `pnpm seed`는 지금 시각 기준의 시연용 일행·예약을 넣는다.
-- 운영 배포 시 `DATABASE_URL`, `API_TOKEN`(16자 이상, 필수)을 환경변수로 준다. 앱은 `-Ppitcrew.serverUrl=… -Ppitcrew.apiToken=…`로 빌드한다.
+- 운영 배포 시 `DATABASE_URL`, `API_TOKEN`(16자 이상, 필수)을 환경변수로 준다. 루프백이 아닌 `HOST`에서는 토큰 없이 시작하지 않는다. 앱은 `-Ppitcrew.serverUrl=… -Ppitcrew.apiToken=…`로 빌드한다.
+- 선택 환경변수: `RATE_LIMIT_PER_MINUTE`(기본 120), `NOTIFY_LIMIT_PER_MINUTE`(문자 발송, 기본 10), `GATEWAY_TIMEOUT_MS`(외부 시스템 호출 제한, 기본 5000), `TRUST_PROXY`(프록시 뒤 배포 시 `true`).
+- 주문·줄서기·문자·예약 변경은 `Idempotency-Key` 헤더를 받는다. 같은 키로 다시 보내면 처음 결과를 돌려주고 외부 시스템에 다시 요청하지 않는다. 앱은 작업 id와 단계로 키를 만든다.
+- 외부 시스템 호출은 트랜잭션 밖에서 하고 앞뒤로 상태를 남긴다(예: 주문 PENDING → ACCEPTED/REJECTED/UNKNOWN). 응답이 없으면 504와 함께 결과 미확인(UNKNOWN)으로 기록한다.
+- release 서명: `~/.gradle/gradle.properties`에 `pitcrew.signing.storeFile`, `pitcrew.signing.storePassword`, `pitcrew.signing.keyAlias`, `pitcrew.signing.keyPassword`를 넣으면 `assembleRelease`가 서명한다.
 
 차량 상태는 Virtual Console로 바꾼다.
 
@@ -66,7 +70,8 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 - Gleo는 action을 문서와 달리 `<패키지명>.<함수명>`으로 보낸다. 매니페스트는 두 형태를 모두 받는다.
 - "일행에게 알려줘"처럼 문자·전화로 들리는 말은 Gleo 기본 메시지 기능으로 간다. 앱 이름("피트크루 앱으로 …")을 넣으면 안정적이다.
 - 강제 종료(force-stop)되었거나 설치 후 한 번도 실행하지 않은 앱에는 방송이 오지 않는다. 설치 후 한 번은 앱을 열어야 한다.
-- Gleo는 7초 안에 콜백을 기다린다. 앱은 5초 예산으로 응답한다.
+- Gleo는 7초 안에 콜백을 기다린다. 앱은 5초 예산으로 응답하고, 승인한 작업은 시간이 넘어도 끝까지 처리한다.
+- 수신기와 응답 방송은 Gleo가 정의한 서명 권한 `ai.umos.gleo.permission.APP_ACTION`으로 막는다. 다른 앱은 명령을 보내거나 응답을 엿볼 수 없다. 실차 Gleo의 권한명이 다르면 매니페스트와 `GleoCallback.GLEO_PERMISSION`을 바꾼다.
 
 ## 앱 기능
 

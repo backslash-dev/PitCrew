@@ -178,7 +178,8 @@ class RemoteOrderHistory(private val api: PitCrewApi) : OrderHistory {
                 storeName = it.getString("storeName"),
                 item = it.getString("item"),
                 pickupAt = it.getString("pickupAt").toLocalDateTime(),
-                cancelled = it.getString("status") == "CANCELLED",
+                // 접수되지 않았거나(거절·결과 미확인) 취소한 주문은 단골 판단에서 뺀다
+                cancelled = it.getString("status") != "ACCEPTED",
             )
         }
 }
