@@ -366,13 +366,13 @@ def main() -> None:
 
     scene(rec, scenes, "02-home", "출발 전", home)
     scene(rec, scenes, "03-route", "목적지 설정", route)
-    scene(rec, scenes, "04-late", "늦음 감지 · 먼저 묻기", drive_late)
-    scene(rec, scenes, "05-pickup", "경로 픽업", pickup)
-    scene(rec, scenes, "06-undo", "되돌리기", undo)
-    scene(rec, scenes, "07-routine", "단골 루틴", routine)
-    optional_scene(rec, scenes, "08-followup", "또 늦음 · 다시 알림", follow_up)
-    scene(rec, scenes, "09-battery", "충전 + 줄서기", battery)
-    scene(rec, scenes, "10-parked", "정차 후", parked)
+    scene(rec, scenes, "04-late", "늦을 것 같으면 먼저 물어요", drive_late)
+    scene(rec, scenes, "05-pickup", "가는 길에 픽업", pickup)
+    scene(rec, scenes, "06-undo", "잘못 시켰으면 되돌려요", undo)
+    scene(rec, scenes, "07-routine", "자주 시키던 메뉴", routine)
+    optional_scene(rec, scenes, "08-followup", "또 늦어지면 다시 맞춰요", follow_up)
+    scene(rec, scenes, "09-battery", "충전하는 동안 줄서기", battery)
+    scene(rec, scenes, "10-parked", "주차한 뒤", parked)
 
     # Gleo 실제 발화를 장면 이벤트에 채운다
     log = logcat()

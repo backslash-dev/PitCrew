@@ -5,7 +5,8 @@ import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.ui.components.EmptyState
 import ai.pitcrew.app.ui.components.PcCard
 import ai.pitcrew.app.ui.components.ScreenHeader
-import ai.pitcrew.app.ui.errand.originLabel
+import ai.pitcrew.app.domain.ErrandOrigin
+import ai.pitcrew.app.ui.errand.SUGGESTED_LABEL
 import ai.pitcrew.app.ui.errand.outcomeLine
 import ai.pitcrew.app.ui.errand.summary
 import ai.pitcrew.app.ui.errand.title
@@ -44,7 +45,7 @@ fun HistoryScreen(errands: List<Errand>, now: LocalDateTime, onOpen: (String) ->
             items(finished, key = { it.id }) { errand ->
                 PcCard(Modifier.fillMaxWidth(), onClick = { onOpen(errand.id) }, padding = PcSpacing.l) {
                     Text(
-                        "${errand.originLabel()} · ${relativeLabel(errand.finishedAt ?: errand.createdAt, now)}",
+                        listOfNotNull(relativeLabel(errand.finishedAt ?: errand.createdAt, now), SUGGESTED_LABEL.takeIf { errand.origin == ErrandOrigin.SUGGESTED }).joinToString("   "),
                         style = PcTheme.type.label,
                         color = PcTheme.colors.textSecondary,
                     )

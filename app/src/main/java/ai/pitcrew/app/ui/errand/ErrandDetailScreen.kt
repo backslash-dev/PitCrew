@@ -65,7 +65,7 @@ fun ErrandDetailScreen(
     onSwitchStore: (Store) -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
-        ScreenHeader(errand?.originLabel() ?: "작업", onBack = onBack)
+        ScreenHeader(errand?.screenTitle() ?: "작업", onBack = onBack)
         if (errand == null) {
             EmptyState("작업을 찾을 수 없어요", "이미 정리되었을 수 있어요.", icon = Icons.Rounded.SearchOff)
             return@Column

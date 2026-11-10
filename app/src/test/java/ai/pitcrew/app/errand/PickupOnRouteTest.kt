@@ -77,4 +77,12 @@ class PickupOnRouteTest {
         // 경로 절반 15분 + 우회 2분 = 18:17 → 18:20, 조리 6분보다 늦음
         assertEquals(LocalTime.of(18, 20), PickupPlanner.readyAt(store, now, 30 * 60))
     }
+
+    @Test
+    fun `화면에서 승인한 뒤 Gleo 확인이 또 오면 다시 주문하지 않는다`() = runTest {
+        handler.handle(request("item" to "아메리카노"))
+        errands.approve(errands.errands.value.single().id, ai.pitcrew.app.domain.ApprovalChannel.TOUCH)
+        assertEquals(GleoStatus.SUCCESS, handler.handle(request("item" to "아메리카노", "confirmed" to true)).status)
+        assertEquals(1, errands.errands.value.size)
+    }
 }

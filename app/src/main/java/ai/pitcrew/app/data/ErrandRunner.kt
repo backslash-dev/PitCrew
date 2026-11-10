@@ -8,9 +8,13 @@ import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.ErrandStep
 import ai.pitcrew.app.domain.StepState
 import kotlinx.coroutines.CancellationException
+import ai.pitcrew.app.data.local.ErrandStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.time.Duration
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -55,10 +60,35 @@ class ErrandRunner(
     private val now: () -> LocalDateTime = LocalDateTime::now,
     private val stepDelayMillis: Long = 0,
     private val workScope: CoroutineScope? = null,
+    private val store: ErrandStore? = null,
 ) : ErrandService {
-    private val _errands = MutableStateFlow<List<Errand>>(emptyList())
+    private val _errands = MutableStateFlow(store?.load()?.let(::recover).orEmpty())
     override val errands: StateFlow<List<Errand>> = _errands.asStateFlow()
     private val mutex = Mutex()
+
+    init {
+        // 저장은 한 곳에서 순서대로 한다. StateFlow라 바뀌는 중간 상태는 건너뛰고 마지막 상태만 쓴다
+        if (store != null && workScope != null) {
+            workScope.launch(Dispatchers.IO) { _errands.drop(1).collect { store.save(it.take(MAX_KEPT)) } }
+        }
+    }
+
+    /** 앱이 실행 도중 종료됐다면 그때 진행 중이던 작업의 결과는 알 수 없다. 서버 기록이 있으면 되돌릴 수 있게 남긴다. */
+    private fun recover(saved: List<Errand>): List<Errand> {
+        val at = now()
+        return saved.filter { Duration.between(it.createdAt, at) <= KEEP_FOR }.take(MAX_KEPT).map { e ->
+            when {
+                e.state == ErrandState.IN_PROGRESS -> e.copy(
+                    state = ErrandState.FAILED,
+                    finishedAt = at,
+                    failureReason = "앱이 다시 시작돼 결과를 확인하지 못했어요",
+                    steps = e.steps.map { if (it.state == StepState.CURRENT) it.copy(state = StepState.FAILED, at = at) else it },
+                )
+                e.undoing -> e.copy(undoing = false, undoNote = "앱이 다시 시작돼 되돌리기 결과를 확인하지 못했어요")
+                else -> e
+            }
+        }
+    }
 
     override fun propose(detail: ErrandDetail, origin: ErrandOrigin): Errand {
         val errand = Errand(
@@ -212,22 +242,24 @@ class ErrandRunner(
     companion object {
         const val APPROVAL_STEP = "승인 대기"
         const val UNDO_STEP = "되돌림"
+        private const val MAX_KEPT = 100
+        private val KEEP_FOR: Duration = Duration.ofDays(14)
         private val HHMM = DateTimeFormatter.ofPattern("HH:mm")
 
         fun plannedSteps(detail: ErrandDetail): List<String> = when (detail) {
             is ErrandDetail.LateArrival -> listOfNotNull(
-                "예약 시간 변경 요청",
-                "변경 확정 · ${detail.proposedTime.format(HHMM)}",
-                if (detail.companions.isEmpty()) null else "일행 ${detail.companions.size}명에게 도착 시간 알림",
+                "식당에 시간 변경 요청",
+                "${detail.proposedTime.format(HHMM)}에 확정",
+                if (detail.companions.isEmpty()) null else "일행 ${detail.companions.size}명에게 알림",
             )
             is ErrandDetail.Pickup -> listOf(
-                "${detail.item} 주문 접수",
-                "픽업 준비 확정 · ${detail.readyAt.format(HHMM)}",
-                "경유지 추가 · ${detail.store.displayName}",
+                "${detail.item} 주문",
+                "${detail.readyAt.format(HHMM)} 픽업 준비 확인",
+                "${detail.store.displayName} 경유지 추가",
             )
             is ErrandDetail.ChargeAndDine -> listOf(
-                "줄서기 등록 · ${detail.restaurant.name}",
-                "경유지 추가 · ${detail.charger.name}",
+                "${detail.restaurant.name} 줄서기",
+                "${detail.charger.name} 경유지 추가",
             )
         }
     }

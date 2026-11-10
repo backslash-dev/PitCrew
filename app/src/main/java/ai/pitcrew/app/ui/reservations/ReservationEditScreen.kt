@@ -11,7 +11,6 @@ import ai.pitcrew.app.ui.components.ScreenHeader
 import ai.pitcrew.app.ui.components.SelectChip
 import ai.pitcrew.app.ui.components.Stepper
 import ai.pitcrew.app.ui.format.dayLabel
-import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.theme.PcSpacing
 import ai.pitcrew.app.ui.theme.PcTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -34,9 +33,13 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
@@ -52,6 +55,7 @@ fun ReservationEditScreen(
     onDelete: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    // 분 선택이 10분 단위라 새 예약도 10분 단위 시각에서 시작한다
     val initialTime = reservation?.time ?: now.plusHours(1).truncatedTo(ChronoUnit.HOURS)
     var place by rememberSaveable { mutableStateOf(reservation?.placeName.orEmpty()) }
     var timeText by rememberSaveable { mutableStateOf(initialTime.toString()) }
@@ -59,6 +63,8 @@ fun ReservationEditScreen(
     var selected by rememberSaveable { mutableStateOf(reservation?.companionIds.orEmpty()) }
     var showError by rememberSaveable { mutableStateOf(false) }
     val time = LocalDateTime.parse(timeText)
+    // 새로 잡거나 시각을 바꾼 예약이 이미 지났으면 저장하지 않는다. 기존 예약을 그대로 두고 다른 항목만 고치는 것은 허용한다
+    val pastTime = time.isBefore(now.truncatedTo(ChronoUnit.MINUTES)) && time != reservation?.time
 
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
         ScreenHeader(if (reservation == null) "예약 추가" else "예약 수정", onBack = onBack)
@@ -71,14 +77,36 @@ fun ReservationEditScreen(
                 }
             }
             Column {
-                FieldLabel(listOfNotNull("시간 (10분 단위)", dayLabel(time.toLocalDate(), now.toLocalDate())).joinToString(" · "))
+                FieldLabel("날짜")
+                val date = time.toLocalDate()
+                val range = dateRange(now.toLocalDate(), reservation?.time?.toLocalDate())
                 Stepper(
-                    time.hhmm(),
-                    onDecrease = { timeText = time.minusMinutes(10).toString() },
-                    onIncrease = { timeText = time.plusMinutes(10).toString() },
-                    decreaseLabel = "−10분",
-                    increaseLabel = "+10분",
+                    dateChipLabel(date, now.toLocalDate()),
+                    onDecrease = { timeText = time.minusDays(1).toString(); showError = false },
+                    onIncrease = { timeText = time.plusDays(1).toString(); showError = false },
+                    valueWidth = 360.dp,
+                    decreaseEnabled = date > range.start,
+                    increaseEnabled = date < range.endInclusive,
                 )
+            }
+            Column {
+                FieldLabel("시각")
+                // 시와 분을 따로 바꿔 날짜가 의도치 않게 넘어가지 않게 한다
+                Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.xxl), verticalAlignment = Alignment.CenterVertically) {
+                    Stepper(
+                        "%02d시".format(time.hour),
+                        onDecrease = { timeText = time.withHour((time.hour + 23) % 24).toString(); showError = false },
+                        onIncrease = { timeText = time.withHour((time.hour + 1) % 24).toString(); showError = false },
+                    )
+                    Stepper(
+                        "%02d분".format(time.minute),
+                        onDecrease = { timeText = time.withMinute((time.minute + 50) % 60).toString(); showError = false },
+                        onIncrease = { timeText = time.withMinute((time.minute + 10) % 60).toString(); showError = false },
+                    )
+                }
+                if (showError && pastTime) {
+                    Text("이미 지난 시각이에요. 날짜나 시각을 바꿔 주세요.", style = PcTheme.type.label, color = PcTheme.colors.negative, modifier = Modifier.padding(top = PcSpacing.xs))
+                }
             }
             Column {
                 FieldLabel("인원")
@@ -110,7 +138,7 @@ fun ReservationEditScreen(
             PcButton(
                 "저장",
                 {
-                    if (place.isBlank()) {
+                    if (place.isBlank() || pastTime) {
                         showError = true
                     } else {
                         onSave(
@@ -131,3 +159,14 @@ fun ReservationEditScreen(
         }
     }
 }
+
+private const val MAX_DAYS_AHEAD = 60L
+
+/** 오늘부터 두 달까지. 이미 지난 날짜의 기존 예약을 고칠 때는 그 날짜부터 고를 수 있다. */
+internal fun dateRange(today: LocalDate, existing: LocalDate?): ClosedRange<LocalDate> =
+    minOf(today, existing ?: today)..today.plusDays(MAX_DAYS_AHEAD)
+
+internal fun dateChipLabel(date: LocalDate, today: LocalDate): String =
+    dayLabel(date, today)?.let { label -> if (label == "내일" || label == "어제") label else "$label (${date.format(WEEKDAY)})" } ?: "오늘"
+
+private val WEEKDAY: DateTimeFormatter = DateTimeFormatter.ofPattern("E", Locale.KOREAN)

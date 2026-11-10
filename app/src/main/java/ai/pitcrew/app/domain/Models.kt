@@ -115,6 +115,13 @@ data class Errand(
     fun canUndo(now: LocalDateTime): Boolean =
         undoable && !undoing && finishedAt != null && Duration.between(finishedAt, now) <= UNDO_WINDOW
 
+    /** 진행 중이거나 방금 끝낸 작업. 같은 요청이 다시 들어오면 새로 실행하지 않고 이 결과를 돌려준다. */
+    fun handledRecently(now: LocalDateTime): Boolean = when (state) {
+        ErrandState.IN_PROGRESS -> true
+        ErrandState.COMPLETED, ErrandState.FAILED -> finishedAt != null && Duration.between(finishedAt, now) <= DUPLICATE_WINDOW
+        else -> false
+    }
+
     /** 답이 없는 제안을 계속 두면 지난 시각으로 실행되거나 다른 제안을 막으므로 만료시킨다. 픽업은 준비 시각이 지나면 바로 만료. */
     fun isStale(now: LocalDateTime): Boolean {
         if (Duration.between(createdAt, now) >= PROPOSAL_TTL) return true
@@ -127,5 +134,6 @@ data class Errand(
         /** 매장이 조리를 시작하기 전, 식당이 자리를 다시 내주기 전에 무를 수 있는 시간. */
         val UNDO_WINDOW: Duration = Duration.ofMinutes(3)
         val PROPOSAL_TTL: Duration = Duration.ofMinutes(10)
+        val DUPLICATE_WINDOW: Duration = Duration.ofMinutes(5)
     }
 }

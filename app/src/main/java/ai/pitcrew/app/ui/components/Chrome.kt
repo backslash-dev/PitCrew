@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 data class RailItem(val route: String, val label: String, val icon: ImageVector, val badge: Int = 0)
@@ -138,15 +139,18 @@ fun Stepper(
     modifier: Modifier = Modifier,
     decreaseLabel: String = "−",
     increaseLabel: String = "+",
+    valueWidth: Dp = 220.dp,
+    decreaseEnabled: Boolean = true,
+    increaseEnabled: Boolean = true,
 ) {
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(PcSpacing.l),
     ) {
-        PcButton(decreaseLabel, onDecrease, size = ButtonSize.MEDIUM, modifier = Modifier.width(140.dp))
-        Text(value, style = PcTheme.type.headline, color = PcTheme.colors.textPrimary, modifier = Modifier.width(220.dp), maxLines = 1)
-        PcButton(increaseLabel, onIncrease, size = ButtonSize.MEDIUM, modifier = Modifier.width(140.dp))
+        PcButton(decreaseLabel, onDecrease, size = ButtonSize.MEDIUM, modifier = Modifier.width(140.dp), enabled = decreaseEnabled)
+        Text(value, style = PcTheme.type.headline, color = PcTheme.colors.textPrimary, modifier = Modifier.width(valueWidth), maxLines = 1)
+        PcButton(increaseLabel, onIncrease, size = ButtonSize.MEDIUM, modifier = Modifier.width(140.dp), enabled = increaseEnabled)
     }
 }
 

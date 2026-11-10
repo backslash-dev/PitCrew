@@ -67,7 +67,7 @@ class ErrandUndoTest {
         val partial = stuck.undo(second.id, ApprovalChannel.TOUCH)
         assertEquals(ErrandState.CANCELLED, partial.state)
         assertEquals(MockStepExecutor.WAYPOINT_REMOVE_FAILED, partial.undoNote)
-        assertEquals("주문을 취소했어요 · 경유지는 내비게이션에서 직접 지워 주세요", partial.outcomeLine())
+        assertEquals("주문을 취소했어요. 경유지는 내비게이션에서 직접 지워 주세요", partial.outcomeLine())
         assertEquals("주문을 취소하고 경유지를 뺐어요", runner.errands.value.single().outcomeLine())
     }
 

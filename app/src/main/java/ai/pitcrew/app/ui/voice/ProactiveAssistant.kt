@@ -90,14 +90,20 @@ class ProactiveAssistant(
     /** 물어본 작업을 돌려준다. 묻지 않았으면 null. */
     suspend fun tick(): Errand? = tickLock.withLock {
         errands.expireStale()
-        if (!enabled.value) return null
+        if (!enabled.value) return skip("disabled")
         // 승인 대기·진행 중인 일이 있으면 겹쳐 묻지 않는다
-        if (errands.errands.value.any { it.isActive }) return null
-        val destination = runCatching { fetchDestination() }.getOrNull() ?: return null
+        if (errands.errands.value.any { it.isActive }) return skip("active errand")
+        val destination = runCatching { fetchDestination() }.onFailure { Log.w(TAG, "destination unavailable", it) }.getOrNull()
+            ?: return skip("no route")
         lateSuggestion(destination)?.let { return ask(it) }
         batterySuggestion()?.let { return ask(it) }
         routineSuggestion()?.let { return ask(it) }
-        null
+        skip("nothing to suggest")
+    }
+
+    private fun skip(reason: String): Errand? {
+        Log.d(TAG, "no suggestion: $reason")
+        return null
     }
 
     private suspend fun lateSuggestion(destination: Destination): Errand? {

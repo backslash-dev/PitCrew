@@ -9,6 +9,7 @@ import ai.pitcrew.app.data.OrderHistory
 import ai.pitcrew.app.data.ReservationRepository
 import ai.pitcrew.app.data.StoreCatalog
 import ai.pitcrew.app.data.WaypointEditor
+import ai.pitcrew.app.data.local.FileErrandStore
 import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
 import ai.pitcrew.app.data.mock.MockChargerCatalog
@@ -44,6 +45,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import java.io.File
 import java.time.LocalDateTime
 
 class PitCrewApplication : Application() {
@@ -84,7 +86,7 @@ class PitCrewApplication : Application() {
             MockStepExecutor(waypoints)
         }
         // 목업은 처리 시간이 없으므로 진행이 보이도록 단계 사이를 띄운다
-        ErrandRunner(executor, stepDelayMillis = if (remote != null) 0 else 600, workScope = scope)
+        ErrandRunner(executor, stepDelayMillis = if (remote != null) 0 else 600, workScope = scope, store = FileErrandStore(File(filesDir, "errands.json")))
     }
 
     val lateArrival: LateArrivalUseCase by lazy {

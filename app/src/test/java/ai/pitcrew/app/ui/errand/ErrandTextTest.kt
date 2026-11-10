@@ -37,7 +37,7 @@ class ErrandTextTest {
     }
 
     @Test
-    fun `진행 중이면 단계 이름 앞부분과 순서를 보여준다`() {
+    fun `진행 중이면 지금 단계와 순서를 보여준다`() {
         val errand = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }).propose(late)
         val inProgress = errand.copy(
             state = ErrandState.IN_PROGRESS,
@@ -49,21 +49,22 @@ class ErrandTextTest {
                 }
             },
         )
-        assertEquals("변경 확정 중 · 2/3", inProgress.progressLine())
+        assertEquals("00:00에 확정 중 (2/3)", inProgress.progressLine())
     }
 
     @Test
     fun `완료하면 결과를 문장으로 말한다`() = runTest {
         val service = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }, stepDelayMillis = 0)
         val done = service.approve(service.propose(late).id, ApprovalChannel.TOUCH)
-        assertEquals("예약을 00:00에 다시 잡았어요 · 일행 2명에게 알렸어요", done.outcomeLine())
+        assertEquals("예약을 00:00에 다시 잡고 김민수, 이서연에게 알렸어요", done.outcomeLine())
+        assertEquals("온담 한식당에 14분 늦어요", done.title())
     }
 
     @Test
     fun `실패하면 실패한 단계를 말한다`() = runTest {
         val service = ErrandRunner(MockStepExecutor(FakeWaypoints { false }), now = { now }, stepDelayMillis = 0)
         val failed = service.approve(service.propose(pickup).id, ApprovalChannel.VOICE)
-        assertEquals("경유지 추가에 실패했어요 · 내비게이션에 경유지를 넣지 못했어요", failed.outcomeLine())
+        assertEquals("세모 커피 역삼점 경유지 추가에 실패했어요. 내비게이션에 경유지를 넣지 못했어요", failed.outcomeLine())
     }
 
     @Test
@@ -72,5 +73,14 @@ class ErrandTextTest {
         val id = service.propose(pickup).id
         service.decline(id)
         assertEquals("거절해서 진행하지 않았어요", service.errands.value.single().outcomeLine())
+    }
+
+    @Test
+    fun `일행이 셋 이상이면 첫 사람 외 몇 명으로 줄인다`() {
+        val many = late.companions + Contact("c3", "박준호", "010-0000-0002")
+        assertEquals("김민수 외 2명", companionNames(many))
+        val followUp = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }).propose(late.copy(followUp = true, companions = emptyList()))
+        assertEquals("온담 한식당에 14분 더 늦어요", followUp.title())
+        assertEquals("예약을 00:00에 다시 잡아요", followUp.summary())
     }
 }

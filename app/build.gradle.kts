@@ -20,12 +20,26 @@ android {
         buildConfigField("String", "API_TOKEN", "\"${providers.gradleProperty("pitcrew.apiToken").getOrElse("")}\"")
     }
 
+    // 서명 키는 저장소에 두지 않는다. ~/.gradle/gradle.properties 등에 pitcrew.signing.* 값을 넣으면 release를 서명한다
+    val keystore = providers.gradleProperty("pitcrew.signing.storeFile").orNull
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = file(keystore)
+                storePassword = providers.gradleProperty("pitcrew.signing.storePassword").get()
+                keyAlias = providers.gradleProperty("pitcrew.signing.keyAlias").get()
+                keyPassword = providers.gradleProperty("pitcrew.signing.keyPassword").get()
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // 에뮬레이터에서 호스트의 로컬 서버로 붙는다. 비워 두면 앱 안 목업으로 동작한다
             buildConfigField("String", "SERVER_URL", "\"${providers.gradleProperty("pitcrew.serverUrl").getOrElse("http://10.0.2.2:3000/")}\"")
         }
         release {
+            if (keystore != null) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

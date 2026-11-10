@@ -101,8 +101,8 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
         }
     }
 
-    // 규제 상태를 모를 때(차량 서비스 재연결 중)는 화면을 바꾸지 않고 승인만 막는다
-    if (driving.requiresDistractionOptimization == true) {
+    // 규제 상태를 모를 때(차량 서비스 연결·재연결 중)도 주행 중일 수 있으므로 입력 화면 대신 주행 화면을 보인다
+    if (driving.requiresDistractionOptimization != false) {
         DrivingScreen(destination, errands, now, listening)
         return
     }

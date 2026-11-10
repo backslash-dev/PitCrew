@@ -175,4 +175,20 @@ class LateArrivalHandlerTest {
         assertEquals(ErrandState.AWAITING_APPROVAL, errand.state)
         assertEquals(LocalTime.of(19, 30), (errand.detail as ErrandDetail.LateArrival).proposedTime)
     }
+
+    @Test
+    fun `화면에서 승인해 예약이 바뀐 뒤 Gleo 확인이 또 와도 다시 실행하지 않는다`() = runTest {
+        handler { route }.handle(request("appointmentTime" to "19:00"))
+        errands.approve(errands.errands.value.single().id, ApprovalChannel.TOUCH)
+        val response = handler { route }.handle(request("appointmentTime" to "19:00", "confirmedTime" to "19:30"))
+        assertEquals(GleoStatus.SUCCESS, response.status)
+        assertEquals(1, errands.errands.value.size)
+    }
+
+    @Test
+    fun `알릴 일행이 없으면 0명이라고 말하지 않는다`() = runTest {
+        val solo = InMemoryReservationRepository(listOf(Reservation("r2", "세모 커피", LocalDateTime.of(2026, 11, 5, 19, 0), 1, emptyList())))
+        val response = LateArrivalHandler(LateArrivalUseCase({ route }, errands, solo, contacts) { now }).handle(request("appointmentTime" to "19:00"))
+        assertTrue(response.message.endsWith("change it to 19:30."))
+    }
 }

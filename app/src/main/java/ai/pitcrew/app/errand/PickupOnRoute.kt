@@ -72,6 +72,11 @@ class PickupUseCase(
         } catch (e: SdkUnavailableException) {
             return PickupOutcome.NavigationUnavailable
         } ?: return PickupOutcome.NoRoute
+        // 화면에서 이미 승인한 뒤 Gleo에도 "응"이라고 한 경우·Gleo 재시도: 같은 메뉴를 방금 주문했으면 다시 주문하지 않는다
+        if (confirmed) {
+            errands.errands.value.firstOrNull { (it.detail as? ErrandDetail.Pickup)?.item == item && it.handledRecently(now()) }
+                ?.let { return PickupOutcome.Finished(it) }
+        }
         // 같은 메뉴를 먼저 물은 제안이 없으면 확인이 붙어 와도(Gleo가 첫 요청부터 confirmed를 붙인 경우) 다시 묻는다
         val asked = errands.errands.value.any {
             it.state == ErrandState.AWAITING_APPROVAL && (it.detail as? ErrandDetail.Pickup)?.item == item
@@ -122,6 +127,7 @@ class PickupOnRouteHandler(private val useCase: PickupUseCase) : GleoActionHandl
                         "Ordered ${d.item} from ${d.store.displayName} for pickup at ${d.readyAt.toClockTime()} and added the store as a waypoint.",
                         d.toData(),
                     )
+                    ErrandState.IN_PROGRESS -> GleoResponse.success(function, "This pickup order is already being processed. The result will be shown in the PitCrew app.")
                     ErrandState.DECLINED -> GleoResponse.fail(function, "The user declined this order on the screen.")
                     else -> GleoResponse.fail(function, "Placing the pickup order failed: ${outcome.errand.failureReason ?: "unknown error"}.")
                 }

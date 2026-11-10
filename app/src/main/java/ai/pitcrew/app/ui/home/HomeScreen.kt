@@ -24,7 +24,6 @@ import ai.pitcrew.app.ui.errand.title
 import ai.pitcrew.app.ui.format.distanceLabel
 import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.format.minutesLabel
-import ai.pitcrew.app.ui.format.relativeLabel
 import ai.pitcrew.app.ui.reservations.ReservationRow
 import ai.pitcrew.app.ui.theme.PcSpacing
 import ai.pitcrew.app.ui.theme.PcTheme
@@ -185,7 +184,8 @@ private fun WorkPanel(state: HomeState, actions: HomeActions, modifier: Modifier
                 val undoable = errand.canUndo(state.now) && state.driving.interactionMode == InteractionMode.TOUCH
                 ListRow(
                     errand.title(),
-                    supporting = "${errand.outcomeLine().orEmpty()} · ${relativeLabel(errand.finishedAt ?: errand.createdAt, state.now)}",
+                    // 시각은 기록 화면에 있으므로 여기서는 결과만 보여 줄바꿈이 어색하게 끊기지 않게 한다
+                    supporting = errand.outcomeLine().orEmpty(),
                     leading = when (errand.state) {
                         ErrandState.COMPLETED -> Icons.Rounded.CheckCircle
                         ErrandState.CANCELLED -> Icons.AutoMirrored.Rounded.Undo

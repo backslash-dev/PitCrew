@@ -105,9 +105,13 @@ class LateArrivalUseCase(
             return LateArrivalOutcome.NavigationUnavailable
         } ?: return LateArrivalOutcome.NoRoute
 
+        val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
+        // 화면에서 이미 승인했는데 Gleo에도 "응"이라고 한 경우·Gleo 재시도: 같은 약속을 방금 처리했으면 다시 실행하지 않는다.
+        // 예약 시각이 이미 바뀌어 아래 예약 찾기로는 못 찾으므로 먼저 본다
+        if (approvedTime != null) recentlyHandled(plan.appointment)?.let { return LateArrivalOutcome.Finished(it, plan, null) }
+
         reservations.refreshNow()
         contacts.ensureLoaded()
-        val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
         val reservation = matchReservation(plan.appointment)
         if (!plan.isLate) return LateArrivalOutcome.OnTime(plan, reservation)
         if (reservation == null) return LateArrivalOutcome.NoReservation(plan)
@@ -145,6 +149,11 @@ class LateArrivalUseCase(
             ),
             origin,
         )
+    }
+
+    private fun recentlyHandled(appointment: LocalDateTime): Errand? = errands.errands.value.firstOrNull {
+        val d = it.detail as? ErrandDetail.LateArrival ?: return@firstOrNull false
+        d.appointment == appointment && it.handledRecently(now())
     }
 
     // 이 예약을 이미 한 번 미뤘고 무르지 않았으면 또 늦는 경우다
@@ -194,7 +203,7 @@ class LateArrivalHandler(private val useCase: LateArrivalUseCase) : GleoActionHa
                 GleoResponse.asking(
                     function,
                     "The driver is expected to be ${outcome.plan.delayMinutes} minutes late for the reservation${outcome.reservation.place()}. " +
-                        "User approval is required to change it to ${detail.proposedTime.toClockTime()} and notify ${detail.companions.size} companions.",
+                        "User approval is required to change it to ${detail.proposedTime.toClockTime()}${detail.notifyClause(" and notify")}.",
                     outcome.plan.toData(outcome.reservation),
                 )
             }
@@ -203,14 +212,22 @@ class LateArrivalHandler(private val useCase: LateArrivalUseCase) : GleoActionHa
                 when (outcome.errand.state) {
                     ErrandState.COMPLETED -> GleoResponse.success(
                         function,
-                        "The reservation${outcome.reservation.place()} was changed to ${detail.proposedTime.toClockTime()} and ${detail.companions.size} companions were notified.",
+                        "The reservation${detail.placeName?.let { " at $it" }.orEmpty()} was changed to ${detail.proposedTime.toClockTime()}${detail.notifyClause(" and notified")}.",
                         listOf(outcome.plan.toData(outcome.reservation).first() + ("confirmedTime" to detail.proposedTime.toClockTime())),
                     )
+                    ErrandState.IN_PROGRESS -> GleoResponse.success(function, "This reservation change is already being processed. The result will be shown in the PitCrew app.")
                     ErrandState.DECLINED -> GleoResponse.fail(function, "The user declined this change on the screen.")
                     else -> GleoResponse.fail(function, "Changing the reservation failed: ${outcome.errand.failureReason ?: "unknown error"}.")
                 }
             }
         }
+    }
+
+    // 알릴 일행이 없으면 "0 companions"라고 말하지 않게 문장에서 뺀다
+    private fun ErrandDetail.LateArrival.notifyClause(verb: String): String = when (companions.size) {
+        0 -> ""
+        1 -> "$verb 1 companion"
+        else -> "$verb ${companions.size} companions"
     }
 
     private fun Reservation?.place(): String = this?.placeName?.let { " at $it" }.orEmpty()

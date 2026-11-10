@@ -1,5 +1,6 @@
 package ai.pitcrew.app.ui.errand
 
+import ai.pitcrew.app.domain.Contact
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandOrigin
@@ -42,26 +43,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-fun Errand.kindLabel(): String = when (detail) {
-    is ErrandDetail.LateArrival -> "지각 대응"
-    is ErrandDetail.Pickup -> "경로 픽업"
-    is ErrandDetail.ChargeAndDine -> "충전 · 줄서기"
+/** 일행 이름. 셋 이상이면 "김민수 외 2명"으로 줄인다. */
+fun companionNames(companions: List<Contact>): String = when {
+    companions.size <= 2 -> companions.joinToString(", ") { it.name }
+    else -> "${companions.first().name} 외 ${companions.size - 1}명"
 }
 
 fun Errand.title(): String = when (val d = detail) {
-    is ErrandDetail.LateArrival -> "${d.placeName ?: "${d.appointment.hhmm()} 약속"} · ${if (d.followUp) "또 " else ""}${d.delayMinutes}분 늦음"
-    is ErrandDetail.Pickup -> "${d.item} · ${d.store.displayName}"
-    is ErrandDetail.ChargeAndDine -> "${d.restaurant.name} · ${d.charger.name}"
+    is ErrandDetail.LateArrival -> "${d.placeName ?: "${d.appointment.hhmm()} 약속"}에 ${d.delayMinutes}분 ${if (d.followUp) "더 " else ""}늦어요"
+    is ErrandDetail.Pickup -> "${d.store.name}에서 ${d.item}"
+    is ErrandDetail.ChargeAndDine -> "${d.charger.name}에서 충전하고 ${d.restaurant.name} 대기"
 }
 
 fun Errand.summary(): String = when (val d = detail) {
     is ErrandDetail.LateArrival -> buildString {
-        if (d.followUp) append("다시 늦어짐 · ")
-        append("예약 ${d.appointment.hhmm()} → ${d.proposedTime.hhmm()}")
-        if (d.companions.isNotEmpty()) append(" · 일행 ${d.companions.size}명 알림")
+        append("예약을 ${d.proposedTime.hhmm()}에 다시 잡")
+        append(if (d.companions.isEmpty()) "아요" else "고 ${companionNames(d.companions)}에게 알려요")
     }
-    is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업 · 우회 ${d.store.detourMinutes}분 · 경유지 추가"
-    is ErrandDetail.ChargeAndDine -> "${d.arriveAt.hhmm()} 도착 · 충전 약 ${d.chargeMinutes}분 · 대기 ${d.restaurant.waitMinutes}분"
+    is ErrandDetail.Pickup -> "${d.readyAt.hhmm()}에 받아요. ${d.store.detourMinutes}분 돌아가요"
+    is ErrandDetail.ChargeAndDine -> "${d.chargeMinutes}분 충전하는 동안 ${d.restaurant.name} 자리가 나요"
 }
 
 /** 진행 중일 때 지금 하는 단계. 승인 단계는 세지 않는다. */
@@ -71,22 +71,22 @@ fun Errand.progressLine(): String? {
     val work = steps.drop(1)
     val index = work.indexOfFirst { it.state == StepState.CURRENT }
     if (index < 0) return null
-    return "${work[index].title.substringBefore(" · ")} 중 · ${index + 1}/${work.size}"
+    return "${work[index].title} 중 (${index + 1}/${work.size})"
 }
 
 /** 끝난 작업의 결과 문장. 진행 중이거나 승인 전이면 null. */
 fun Errand.outcomeLine(): String? = when (state) {
     ErrandState.COMPLETED -> when (val d = detail) {
         is ErrandDetail.LateArrival -> buildString {
-            append("예약을 ${d.proposedTime.hhmm()}에 다시 잡았어요")
-            if (d.companions.isNotEmpty()) append(" · 일행 ${d.companions.size}명에게 알렸어요")
+            append("예약을 ${d.proposedTime.hhmm()}에 다시 잡")
+            append(if (d.companions.isEmpty()) "았어요" else "고 ${companionNames(d.companions)}에게 알렸어요")
         }
-        is ErrandDetail.Pickup -> "${d.readyAt.hhmm()} 픽업으로 주문하고 경유지에 추가했어요"
-        is ErrandDetail.ChargeAndDine -> "${d.restaurant.name} 줄서기를 등록하고 충전소를 경유지에 추가했어요"
+        is ErrandDetail.Pickup -> "${d.readyAt.hhmm()}에 받도록 주문하고 경유지에 넣었어요"
+        is ErrandDetail.ChargeAndDine -> "${d.restaurant.name}에 줄을 서 두고 충전소를 경유지에 넣었어요"
     }
     ErrandState.FAILED -> {
-        val step = steps.firstOrNull { it.state == StepState.FAILED }?.let { "${it.title.substringBefore(" · ")}에 실패했어요" } ?: "처리하지 못했어요"
-        failureReason?.let { "$step · $it" } ?: step
+        val step = steps.firstOrNull { it.state == StepState.FAILED }?.let { "${it.title}에 실패했어요" } ?: "처리하지 못했어요"
+        failureReason?.let { "$step. $it" } ?: step
     }
     ErrandState.DECLINED -> "거절해서 진행하지 않았어요"
     ErrandState.EXPIRED -> "답이 없어 진행하지 않았어요"
@@ -99,7 +99,7 @@ fun Errand.outcomeLine(): String? = when (state) {
             is ErrandDetail.Pickup -> if (partial) "주문을 취소했어요" else "주문을 취소하고 경유지를 뺐어요"
             is ErrandDetail.ChargeAndDine -> if (partial) "줄서기를 취소했어요" else "줄서기를 취소하고 경유지를 뺐어요"
         }
-        undoNote?.let { "$done · $it" } ?: done
+        undoNote?.let { "$done. $it" } ?: done
     }
     else -> null
 }
@@ -123,8 +123,10 @@ fun ErrandCard(
 ) {
     val colors = PcTheme.colors
     PcCard(modifier = modifier.fillMaxWidth(), onClick = onOpen) {
-        Text(errand.originLabel(), style = PcTheme.type.label, color = colors.textSecondary)
-        Spacer(Modifier.height(PcSpacing.s))
+        if (errand.origin == ErrandOrigin.SUGGESTED) {
+            Text(SUGGESTED_LABEL, style = PcTheme.type.label, color = colors.textSecondary)
+            Spacer(Modifier.height(PcSpacing.s))
+        }
         Text(errand.title(), style = PcTheme.type.title, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(PcSpacing.xs))
         val progress = errand.progressLine()
@@ -142,8 +144,10 @@ fun ErrandCard(
     }
 }
 
-/** PitCrew가 먼저 제안한 일은 시킨 일과 구분해 표시한다. */
-fun Errand.originLabel(): String = if (origin == ErrandOrigin.SUGGESTED) "${kindLabel()} · 먼저 제안" else kindLabel()
+/** PitCrew가 먼저 제안한 일만 따로 표시한다. 시킨 일은 제목만으로 충분하다. */
+const val SUGGESTED_LABEL = "PitCrew가 먼저 물어봤어요"
+
+fun Errand.screenTitle(): String = if (origin == ErrandOrigin.SUGGESTED) "PitCrew가 먼저 물어본 일" else "요청한 일"
 
 /** 주차 중에만 탭으로 승인한다. 주행 중이거나 규제 상태를 모르면 음성 승인 안내만 보인다. */
 @Composable

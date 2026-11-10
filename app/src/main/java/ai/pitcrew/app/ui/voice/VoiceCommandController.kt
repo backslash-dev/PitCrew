@@ -129,7 +129,7 @@ class VoiceCommandController(
             // "취소"라는 말이 다른 문장에 섞여도 바로 무르지 않게, 대상만 알려 주고 화면에서 확인받는다
             VoiceCommand.Undo -> when (val outcome = undo.run(confirmed = false, channel = ApprovalChannel.VOICE)) {
                 UndoOutcome.NothingToUndo -> done("되돌릴 수 있는 최근 작업이 없어요. 끝낸 지 ${Errand.UNDO_WINDOW.toMinutes()}분 안의 작업만 되돌릴 수 있어요.")
-                is UndoOutcome.AwaitingConfirmation -> done("“${outcome.errand.title()}” 작업을 되돌리려면 최근 목록의 되돌리기를 눌러 주세요.")
+                is UndoOutcome.AwaitingConfirmation -> done("방금 한 일(${outcome.errand.title()})을 되돌리려면 최근 목록에서 되돌리기를 눌러 주세요.")
                 is UndoOutcome.Finished -> done("되돌렸어요.")
             }
             VoiceCommand.Unknown -> done("어떤 일을 할지 알아듣지 못했어요. 지각 대응, 픽업 주문, 충전, 되돌리기를 말해 주세요.")
