@@ -124,7 +124,9 @@ def gleo_lines(log: str) -> list[str]:
 
 def api(method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(f"{SERVER}{path}", data=data, method=method, headers={"content-type": "application/json"})
+    # 본문 없는 요청(DELETE 등)에 JSON 헤더를 붙이면 서버가 빈 본문을 거절한다
+    headers = {"content-type": "application/json"} if data is not None else {}
+    request = urllib.request.Request(f"{SERVER}{path}", data=data, method=method, headers=headers)
     with urllib.request.urlopen(request, timeout=10) as response:
         text = response.read().decode()
         return json.loads(text) if text else {}
