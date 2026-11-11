@@ -15,9 +15,9 @@ class ReservationDatesTest {
     }
 
     @Test
-    fun `날짜 칩은 오늘·내일과 요일 붙은 날짜로 보인다`() {
-        assertEquals("오늘", dateChipLabel(today, today))
-        assertEquals("내일", dateChipLabel(today.plusDays(1), today))
-        assertEquals("11월 12일 (목)", dateChipLabel(today.plusDays(2), today))
+    fun `날짜 버튼은 오늘·내일을 앞에 붙인다`() {
+        assertEquals("오늘 11월 10일 (화)", dateButtonLabel(today, today))
+        assertEquals("내일 11월 11일 (수)", dateButtonLabel(today.plusDays(1), today))
+        assertEquals("11월 12일 (목)", dateButtonLabel(today.plusDays(2), today))
     }
 }

@@ -4,13 +4,13 @@ import ai.pitcrew.app.domain.Contact
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.ui.components.ButtonKind
 import ai.pitcrew.app.ui.components.ButtonSize
+import ai.pitcrew.app.ui.components.DatePickerDialog
 import ai.pitcrew.app.ui.components.FieldLabel
 import ai.pitcrew.app.ui.components.PcButton
 import ai.pitcrew.app.ui.components.PcTextField
 import ai.pitcrew.app.ui.components.ScreenHeader
 import ai.pitcrew.app.ui.components.SelectChip
 import ai.pitcrew.app.ui.components.Stepper
-import ai.pitcrew.app.ui.format.dayLabel
 import ai.pitcrew.app.ui.theme.PcSpacing
 import ai.pitcrew.app.ui.theme.PcTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,6 +64,7 @@ fun ReservationEditScreen(
     var partySize by rememberSaveable { mutableIntStateOf(reservation?.partySize ?: 2) }
     var selected by rememberSaveable { mutableStateOf(reservation?.companionIds.orEmpty()) }
     var showError by rememberSaveable { mutableStateOf(false) }
+    var pickingDate by rememberSaveable { mutableStateOf(false) }
     val time = LocalDateTime.parse(timeText)
     // 새로 잡거나 시각을 바꾼 예약이 이미 지났으면 저장하지 않는다. 기존 예약을 그대로 두고 다른 항목만 고치는 것은 허용한다
     val pastTime = time.isBefore(now.truncatedTo(ChronoUnit.MINUTES)) && time != reservation?.time
@@ -79,15 +82,27 @@ fun ReservationEditScreen(
             Column {
                 FieldLabel("날짜")
                 val date = time.toLocalDate()
-                val range = dateRange(now.toLocalDate(), reservation?.time?.toLocalDate())
-                Stepper(
-                    dateChipLabel(date, now.toLocalDate()),
-                    onDecrease = { timeText = time.minusDays(1).toString(); showError = false },
-                    onIncrease = { timeText = time.plusDays(1).toString(); showError = false },
-                    valueWidth = 360.dp,
-                    decreaseEnabled = date > range.start,
-                    increaseEnabled = date < range.endInclusive,
+                PcButton(
+                    dateButtonLabel(date, now.toLocalDate()),
+                    { pickingDate = true },
+                    kind = ButtonKind.BASIC,
+                    size = ButtonSize.MEDIUM,
+                    icon = Icons.Rounded.CalendarMonth,
+                    modifier = Modifier.widthIn(min = 420.dp),
                 )
+                if (pickingDate) {
+                    DatePickerDialog(
+                        selected = date,
+                        range = dateRange(now.toLocalDate(), reservation?.time?.toLocalDate()),
+                        today = now.toLocalDate(),
+                        onSelect = {
+                            timeText = it.atTime(time.toLocalTime()).toString()
+                            showError = false
+                            pickingDate = false
+                        },
+                        onDismiss = { pickingDate = false },
+                    )
+                }
             }
             Column {
                 FieldLabel("시각")
@@ -166,7 +181,14 @@ private const val MAX_DAYS_AHEAD = 60L
 internal fun dateRange(today: LocalDate, existing: LocalDate?): ClosedRange<LocalDate> =
     minOf(today, existing ?: today)..today.plusDays(MAX_DAYS_AHEAD)
 
-internal fun dateChipLabel(date: LocalDate, today: LocalDate): String =
-    dayLabel(date, today)?.let { label -> if (label == "내일" || label == "어제") label else "$label (${date.format(WEEKDAY)})" } ?: "오늘"
+/** "오늘 11월 11일 (수)", "내일 …"처럼 가까운 날은 앞에 붙인다. */
+internal fun dateButtonLabel(date: LocalDate, today: LocalDate): String {
+    val base = "${date.monthValue}월 ${date.dayOfMonth}일 (${date.format(WEEKDAY)})"
+    return when (date) {
+        today -> "오늘 $base"
+        today.plusDays(1) -> "내일 $base"
+        else -> base
+    }
+}
 
 private val WEEKDAY: DateTimeFormatter = DateTimeFormatter.ofPattern("E", Locale.KOREAN)
