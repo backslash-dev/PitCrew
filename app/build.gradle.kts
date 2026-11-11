@@ -29,6 +29,8 @@ android {
                 storePassword = providers.gradleProperty("pitcrew.signing.storePassword").get()
                 keyAlias = providers.gradleProperty("pitcrew.signing.keyAlias").get()
                 keyPassword = providers.gradleProperty("pitcrew.signing.keyPassword").get()
+                // Pleos 차량 보안 요건(사이닝 키 로테이션·리니지)은 v3 서명이 있어야 충족된다
+                enableV3Signing = true
             }
         }
     }
