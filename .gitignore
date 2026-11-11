@@ -15,3 +15,6 @@ app/local.properties
 server/node_modules/
 server/dist/
 server/.env
+
+# 로컬 시연 촬영 도구
+scripts/demo/

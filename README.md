@@ -97,15 +97,6 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 - 예약 변경·알림 발송·주문·줄서기·매장/충전소 조회·약속 조율·메일은 서버가 처리한다. 식당·매장·줄서기·문자·상대 에이전트·메일 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청·취소 이력은 DB에 남는다.
 - 주행 중에는 조작 요소 없는 주행 화면으로 바뀐다(MainActivity에 DO 선언).
 
-## 시연 영상
-
-```bash
-python3 scripts/demo/record.py /Volumes/T7/pitcrew-captures/demo/take1   # 에뮬레이터·서버 실행 상태에서 장면별 녹화
-python3 scripts/demo/compose.py /Volumes/T7/pitcrew-captures/demo/take1  # 자막·카드 합성 → pitcrew-demo.mp4
-```
-
-녹화 스크립트가 예약을 "지금 + 30분 안팎"으로 맞추고 Gleo에 테스트 입력으로 말을 넣는다. Gleo가 실제로 한 말은 로그에서 뽑아 자막으로 쓰고, Gleo가 기대와 다르게 반응한 장면은 다시 찍는다. 에뮬레이터 시간대는 서울로 고정한다(`settings put global auto_time_zone 0`, `cmd alarm set-timezone Asia/Seoul`).
-
 ## 에뮬레이터 주의 사항
 
 - 마이크 없이 먼저 묻기를 확인하려면 debug 빌드 전용 방송을 쓴다(adb shell만 보낼 수 있음).
