@@ -8,7 +8,7 @@ import { DEFAULT_GATEWAY_TIMEOUT_MS } from '../src/modules/deps.js';
 
 export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'mysql://pitcrew:pitcrew@127.0.0.1:3308/pitcrew_test';
 
-const DATA_TABLES = ['idempotency_keys', 'waitlists', 'notifications', 'orders', 'reservation_changes', 'reservation_companions', 'reservations', 'contacts'];
+const DATA_TABLES = ['mail_replies', 'mails', 'meetup_requests', 'meetups', 'peer_profiles', 'idempotency_keys', 'waitlists', 'notifications', 'orders', 'reservation_changes', 'reservation_companions', 'reservations', 'contacts'];
 
 export interface TestContext {
   app: FastifyInstance;

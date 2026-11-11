@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync } from 'fastify';
-import type { RowDataPacket } from 'mysql2/promise';
+import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { z } from 'zod';
+import type { Notifier, SendResult } from '../adapters/gateways.js';
 import { GatewayTimeoutError, withTimeout } from '../adapters/timeout.js';
 import { HttpError } from '../http/errors.js';
 import { idempotencyKey } from '../http/idempotency.js';
@@ -37,17 +38,41 @@ interface NotificationRow extends RowDataPacket {
   created_at: Date;
 }
 
-/** 이력 응답에는 가운데 자리를 가린 번호만 준다. */
 export const maskPhone = (phone: string) => phone.replace(/^(\d{3})-(\d{3,4})-(\d{4})$/, (_, a: string, b: string, c: string) => `${a}-${'*'.repeat(b.length)}-${c}`);
+
+/** 실패도 FAILED로 기록한 뒤 던져, 부르는 쪽이 결과 미확인으로 다루게 한다. */
+export async function sendRecorded(
+  db: Pool,
+  notifier: Notifier,
+  timeoutMs: number,
+  contact: { id: string; name: string; phone: string },
+  text: string,
+): Promise<SendResult> {
+  const id = randomUUID();
+  await db.execute(
+    `INSERT INTO notifications (id, recipient_name, recipient_phone, message, status, provider, contact_id) VALUES (?, ?, ?, ?, 'QUEUED', ?, ?)`,
+    [id, contact.name, contact.phone, text, notifier.provider, contact.id],
+  );
+  let sent: SendResult;
+  try {
+    sent = await withTimeout(notifier.send({ name: contact.name, phone: contact.phone, text }), timeoutMs);
+  } catch (error) {
+    await db.execute("UPDATE notifications SET status = 'FAILED', error = ? WHERE id = ?", [error instanceof GatewayTimeoutError ? 'TIMEOUT' : 'PROVIDER_ERROR', id]);
+    throw error;
+  }
+  await db.execute('UPDATE notifications SET status = ?, provider_message_id = ?, error = ? WHERE id = ?', [
+    sent.ok ? 'SENT' : 'FAILED',
+    sent.ok ? sent.messageId : null,
+    sent.ok ? null : sent.error.slice(0, 255),
+    id,
+  ]);
+  return sent;
+}
 
 export const notificationRoutes: FastifyPluginAsync<Deps> = async (
   app,
   { db, gateways, gatewayTimeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS, notifyLimitPerMinute = 10 },
 ) => {
-  /**
-   * 일행에게 알림을 보낸다. 받는 사람마다 결과를 따로 돌려주고, 발송 내역은 실패도 남긴다.
-   * Idempotency-Key가 있으면 같은 요청을 다시 받아도 이미 보낸 사람에게는 다시 보내지 않는다.
-   */
   app.post('/notifications', { config: { rateLimit: { max: notifyLimitPerMinute, timeWindow: '1 minute' } } }, async (request) => {
     const body = SendBody.parse(request.body);
     const requestKey = idempotencyKey(request);
@@ -68,7 +93,7 @@ export const notificationRoutes: FastifyPluginAsync<Deps> = async (
         results.push({ contactId: contact.id, name: contact.name, status: 'SENT' });
         continue;
       }
-      // 보내기 전에 기록해 두어, 발송 뒤 저장에 실패해도 무엇을 보내려 했는지 남는다
+      // 발송 뒤 저장에 실패해도 무엇을 보내려 했는지 남게 먼저 기록한다
       const id = earlier?.id ?? randomUUID();
       if (!earlier) {
         try {
@@ -78,7 +103,7 @@ export const notificationRoutes: FastifyPluginAsync<Deps> = async (
             [id, contact.name, contact.phone, body.message, gateways.notifier.provider, contact.id, requestKey],
           );
         } catch (error) {
-          // 같은 요청이 동시에 두 번 들어온 경우. 먼저 들어온 쪽이 보낸다
+          // 같은 요청이 동시에 들어오면 먼저 들어온 쪽만 보낸다
           if ((error as { code?: string }).code === 'ER_DUP_ENTRY') throw new HttpError(409, 'IN_PROGRESS', '같은 요청을 처리하는 중입니다');
           throw error;
         }
@@ -86,7 +111,7 @@ export const notificationRoutes: FastifyPluginAsync<Deps> = async (
       const sent = await withTimeout(gateways.notifier.send({ name: contact.name, phone: contact.phone, text: body.message }), gatewayTimeoutMs).catch(
         (error: unknown) => {
           request.log.warn({ err: error, notificationId: id }, 'notifier failed');
-          // 공급자 오류 원문에는 내부 정보가 섞일 수 있어 저장·응답에는 정해진 코드만 쓴다
+          // 공급자 오류 원문에는 내부 정보가 섞일 수 있어 정해진 코드만 쓴다
           return { ok: false as const, error: error instanceof GatewayTimeoutError ? 'TIMEOUT' : 'PROVIDER_ERROR' };
         },
       );

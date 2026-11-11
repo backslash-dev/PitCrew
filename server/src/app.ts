@@ -5,6 +5,8 @@ import { registerAuth } from './http/auth.js';
 import { HttpError, registerErrorHandler } from './http/errors.js';
 import { chargingRoutes } from './modules/charging.js';
 import { contactRoutes } from './modules/contacts.js';
+import { mailRoutes } from './modules/mails.js';
+import { meetupRoutes } from './modules/meetups.js';
 import type { Deps } from './modules/deps.js';
 import { notificationRoutes } from './modules/notifications.js';
 import { orderRoutes } from './modules/orders.js';
@@ -15,7 +17,7 @@ import { healthRoutes } from './routes/health.js';
 type AppConfig = Pick<Config, 'LOG_LEVEL' | 'API_TOKEN'> & Partial<Pick<Config, 'RATE_LIMIT_PER_MINUTE' | 'TRUST_PROXY'>>;
 
 export function buildApp(config: AppConfig, deps: Deps): FastifyInstance {
-  // 프록시 뒤에 두면 클라이언트 IP를 X-Forwarded-For에서 읽어야 요청 제한이 사람별로 걸린다
+  // 프록시 뒤에서는 X-Forwarded-For를 믿어야 요청 제한이 사람별로 걸린다
   const app = Fastify({ logger: { level: config.LOG_LEVEL }, trustProxy: config.TRUST_PROXY ?? false });
   registerErrorHandler(app);
   app.register(healthRoutes, { db: deps.db });
@@ -35,6 +37,8 @@ export function buildApp(config: AppConfig, deps: Deps): FastifyInstance {
       await v1.register(orderRoutes, deps);
       await v1.register(notificationRoutes, deps);
       await v1.register(chargingRoutes, deps);
+      await v1.register(meetupRoutes, deps);
+      await v1.register(mailRoutes, deps);
     },
     { prefix: '/v1' },
   );

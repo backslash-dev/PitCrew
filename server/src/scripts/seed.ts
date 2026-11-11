@@ -1,8 +1,8 @@
 import { loadConfig } from '../config.js';
 import { migrate } from '../db/migrate.js';
 import { createPool } from '../db/pool.js';
+import { DEMO_MAILS } from './demoMails.js';
 
-/** 시연용 일행·예약을 넣는다. 예약 시각은 지금 기준이라 언제 실행해도 다가오는 예약이 된다. 운영에서는 실행하지 않는다. */
 const config = loadConfig();
 if (config.NODE_ENV === 'production') throw new Error('운영 환경에서는 시드를 넣지 않습니다');
 
@@ -17,6 +17,23 @@ try {
   for (const [id, name, phone] of contacts) {
     await db.execute('INSERT INTO contacts (id, name, phone) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), phone = VALUES(phone)', [id, name, phone]);
   }
+  const freeFrom = new Date(Math.ceil(Date.now() / (10 * 60_000)) * 10 * 60_000);
+  const hours = (n: number) => new Date(freeFrom.getTime() + n * 3_600_000);
+  const profiles = [
+    [contacts[0][0], 1, 37.3948, 127.1112, freeFrom, hours(6)],
+    [contacts[1][0], 0, 37.5563, 126.9236, freeFrom, hours(6)],
+    [contacts[2][0], 1, 37.5133, 127.1001, hours(1), hours(7)],
+  ] as const;
+  for (const [contactId, hasAgent, latitude, longitude, from, until] of profiles) {
+    await db.execute(
+      `INSERT INTO peer_profiles (contact_id, has_agent, latitude, longitude, free_from, free_until) VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE has_agent = VALUES(has_agent), latitude = VALUES(latitude), longitude = VALUES(longitude), free_from = VALUES(free_from), free_until = VALUES(free_until)`,
+      [contactId, hasAgent, latitude, longitude, from, until],
+    );
+  }
+  // 앞선 시연의 약속 예약이 남으면 일정이 겹쳐 새 약속을 못 잡는다
+  await db.execute('DELETE r FROM reservations r JOIN meetups m ON m.reservation_id = r.id');
+  await db.execute('DELETE FROM meetups');
   const dinner = new Date(Math.ceil((Date.now() + 50 * 60_000) / (30 * 60_000)) * 30 * 60_000);
   const reservations = [
     ['8a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c01', '온담 한식당', dinner, 3, [contacts[0][0], contacts[1][0]]],
@@ -32,7 +49,6 @@ try {
       await db.execute('INSERT INTO reservation_companions (reservation_id, contact_id) VALUES (?, ?)', [id, contactId]);
     }
   }
-  // 최근 사흘 같은 시간대에 같은 메뉴를 픽업한 이력. 앱이 '오늘도 주문할까요?'를 제안하는 근거가 된다
   const routineOrders = [1, 2, 3].map((daysAgo, index) => [
     `3c7e9a1b-5d2f-4b8e-a6c4-0f1e2d3c4b0${index + 1}`,
     new Date(Date.now() - daysAgo * 86_400_000 + 10 * 60_000),
@@ -45,8 +61,18 @@ try {
       [id, pickupAt, placedAt],
     );
   }
+  await db.execute('DELETE FROM mails');
+  const mail = DEMO_MAILS[0];
+  await db.execute('INSERT INTO mails (id, sender_name, sender_email, subject, body, received_at) VALUES (?, ?, ?, ?, ?, ?)', [
+    '6b2e4d8f-1a3c-4e5b-9d7f-2c4e6a8b0d01',
+    mail.senderName,
+    mail.senderEmail,
+    mail.subject,
+    mail.body,
+    new Date(Date.now() - 4 * 60_000),
+  ]);
   console.log(
-    `seeded ${contacts.length} contacts, ${reservations.length} reservations (dinner at ${dinner.toISOString()}), ${routineOrders.length} routine orders`,
+    `seeded ${contacts.length} contacts (${profiles.length} peer profiles), ${reservations.length} reservations (dinner at ${dinner.toISOString()}), ${routineOrders.length} routine orders, 1 mail`,
   );
 } finally {
   await db.end();

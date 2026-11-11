@@ -50,6 +50,26 @@ async function findReservation(db: Deps['db'] | PoolConnection, id: string) {
   return rows[0] ? toJson(rows[0]) : null;
 }
 
+/** 호출한 쪽의 트랜잭션 안에서 부른다. */
+export async function saveReservation(
+  connection: PoolConnection,
+  id: string,
+  reservation: { placeName: string; reservedAt: Date; partySize: number; companionIds: readonly string[] },
+) {
+  await connection.execute(
+    `INSERT INTO reservations (id, place_name, reserved_at, party_size) VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE place_name = VALUES(place_name), reserved_at = VALUES(reserved_at), party_size = VALUES(party_size)`,
+    [id, reservation.placeName, reservation.reservedAt, reservation.partySize],
+  );
+  await connection.execute('DELETE FROM reservation_companions WHERE reservation_id = ?', [id]);
+  const companions = [...new Set(reservation.companionIds)];
+  if (companions.length > 0) {
+    const [known] = await connection.query<RowDataPacket[]>('SELECT id FROM contacts WHERE id IN (?)', [companions]);
+    if (known.length !== companions.length) throw new HttpError(400, 'UNKNOWN_CONTACT', '등록되지 않은 일행이 있습니다');
+    await connection.query('INSERT INTO reservation_companions (reservation_id, contact_id) VALUES ?', [companions.map((contactId) => [id, contactId])]);
+  }
+}
+
 export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways, gatewayTimeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS }) => {
   app.get('/reservations', async () => {
     const [rows] = await db.execute<ReservationRow[]>(`${SELECT_RESERVATIONS} GROUP BY r.id ORDER BY r.reserved_at`);
@@ -62,20 +82,7 @@ export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gat
     const connection = await db.getConnection();
     try {
       await connection.beginTransaction();
-      await connection.execute(
-        `INSERT INTO reservations (id, place_name, reserved_at, party_size) VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE place_name = VALUES(place_name), reserved_at = VALUES(reserved_at), party_size = VALUES(party_size)`,
-        [id, body.placeName, body.reservedAt, body.partySize],
-      );
-      await connection.execute('DELETE FROM reservation_companions WHERE reservation_id = ?', [id]);
-      const companions = [...new Set(body.companionIds)];
-      if (companions.length > 0) {
-        const [known] = await connection.query<RowDataPacket[]>('SELECT id FROM contacts WHERE id IN (?)', [companions]);
-        if (known.length !== companions.length) throw new HttpError(400, 'UNKNOWN_CONTACT', '등록되지 않은 일행이 있습니다');
-        await connection.query('INSERT INTO reservation_companions (reservation_id, contact_id) VALUES ?', [
-          companions.map((contactId) => [id, contactId]),
-        ]);
-      }
+      await saveReservation(connection, id, body);
       await connection.commit();
       return await findReservation(connection, id);
     } catch (error) {
@@ -93,10 +100,6 @@ export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gat
     return reply.status(204).send();
   });
 
-  /**
-   * 식당에 시간 변경을 요청하고, 받아들여지면 예약 시각을 바꾼다. 변경 상태: REQUESTED → ACCEPTED | REJECTED | UNKNOWN | CONFLICT.
-   * 식당 호출은 트랜잭션 밖에서 하고 앞뒤로 기록해, 식당과 DB가 어긋나도 이력이 남는다.
-   */
   app.post('/reservations/:id/reschedule', async (request, reply) => {
     const { id } = Params.parse(request.params);
     const { reservedAt } = RescheduleBody.parse(request.body);
@@ -152,10 +155,7 @@ export const reservationRoutes: FastifyPluginAsync<Deps> = async (app, { db, gat
     });
   });
 
-  /**
-   * 받아들여진 변경을 무르고 원래 시각으로 되돌린다. 그 뒤로 예약이 다시 바뀌었으면 엉뚱한 시각으로 돌아가지 않게 거절한다.
-   * 이미 되돌린 변경을 다시 요청하면(응답 유실 뒤 재시도) 현재 예약을 그대로 돌려준다.
-   */
+  /** 그 뒤로 예약이 다시 바뀌었으면 엉뚱한 시각으로 돌아가지 않게 거절한다. */
   app.post('/reservation-changes/:id/revert', async (request) => {
     const { id } = Params.parse(request.params);
     const claimed = await inTransaction(async (connection) => {
