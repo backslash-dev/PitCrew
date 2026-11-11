@@ -32,3 +32,15 @@ class TimeLabelTest {
         assertEquals("오후 6시", timeLabel(java.time.LocalTime.of(18, 0)))
     }
 }
+
+class TimeWheelTest {
+    @Test
+    fun `휠 값은 오전·오후와 12시간제를 24시간으로 바꾸고 분은 5분 단위로 내린다`() {
+        // 시 휠은 12, 1, 2, …, 11 순서
+        assertEquals(java.time.LocalTime.of(0, 0), toTime(period = 0, hourIndex = 0, minuteIndex = 0))
+        assertEquals(java.time.LocalTime.of(12, 5), toTime(period = 1, hourIndex = 0, minuteIndex = 1))
+        assertEquals(java.time.LocalTime.of(11, 55), toTime(period = 0, hourIndex = 11, minuteIndex = 11))
+        assertEquals(java.time.LocalTime.of(19, 35), toTime(period = 1, hourIndex = 7, minuteIndex = 7))
+        assertEquals(java.time.LocalTime.of(18, 40), roundDownToStep(java.time.LocalTime.of(18, 43, 20)))
+    }
+}

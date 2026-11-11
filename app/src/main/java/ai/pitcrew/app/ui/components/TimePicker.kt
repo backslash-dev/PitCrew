@@ -4,88 +4,119 @@ import ai.pitcrew.app.ui.theme.PcShape
 import ai.pitcrew.app.ui.theme.PcSpacing
 import ai.pitcrew.app.ui.theme.PcTheme
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.launch
 import java.time.LocalTime
 
-private val CELL = 96.dp
-private val MINUTES = (0..50 step 10).toList()
+private val ITEM_HEIGHT = 80.dp
+private const val VISIBLE_ITEMS = 5
+private const val MINUTE_STEP = 5
+private val PERIODS = listOf("오전", "오후")
+// 시계처럼 12부터 시작해 오전 12시(자정)·오후 12시(정오)가 각 구간 맨 앞에 오게 한다
+private val HOURS = listOf("12") + (1..11).map { "$it" }
+private val MINUTES = (0 until 60 step MINUTE_STEP).map { "%02d".format(it) }
 
-/**
- * 오전·오후, 시, 분을 한 화면에서 바로 고른다. 분은 예약 단위에 맞춰 10분 간격이다.
- * 고른 값은 바로 반영되고 "확인"으로 닫는다.
- */
+/** 오전·오후, 시, 분 휠을 돌려 고른다. 분은 5분 단위이고, "확인"을 눌러야 반영한다. */
 @Composable
 fun TimePickerDialog(selected: LocalTime, onConfirm: (LocalTime) -> Unit, onDismiss: () -> Unit) {
-    var hour by rememberSaveable { mutableIntStateOf(selected.hour) }
-    var minute by rememberSaveable { mutableIntStateOf(selected.minute) }
+    val start = roundDownToStep(selected)
+    var period by rememberSaveable { mutableIntStateOf(if (start.hour < 12) 0 else 1) }
+    var hourIndex by rememberSaveable { mutableIntStateOf(start.hour % 12) }
+    var minuteIndex by rememberSaveable { mutableIntStateOf(start.minute / MINUTE_STEP) }
+    val chosen = toTime(period, hourIndex, minuteIndex)
     val colors = PcTheme.colors
-    val afternoon = hour >= 12
     Dialog(onDismissRequest = onDismiss) {
         Column(
-            Modifier.background(colors.surface, PcShape.large).padding(PcSpacing.xl),
-            verticalArrangement = Arrangement.spacedBy(PcSpacing.m),
+            Modifier.background(colors.surface, PcShape.large).padding(PcSpacing.xl).width(560.dp),
+            verticalArrangement = Arrangement.spacedBy(PcSpacing.l),
         ) {
-            Text(timeLabel(LocalTime.of(hour, minute)), style = PcTheme.type.headline, color = colors.textPrimary)
-            SegmentedTabs(
-                listOf("오전", "오후"),
-                if (afternoon) 1 else 0,
-                onSelect = { index -> hour = hour % 12 + if (index == 1) 12 else 0 },
-            )
-            FieldLabel("시")
-            (0 until 2).forEach { row ->
-                Row {
-                    (1..6).map { row * 6 + it }.forEach { h12 ->
-                        val h24 = h12 % 12 + if (afternoon) 12 else 0
-                        Choice("$h12", selected = h24 == hour) { hour = h24 }
-                    }
+            Text(timeLabel(chosen), style = PcTheme.type.headline, color = colors.textPrimary)
+            Box(contentAlignment = Alignment.Center) {
+                // 가운데 줄이 고른 값임을 보이는 띠
+                Box(Modifier.fillMaxWidth().height(ITEM_HEIGHT).background(colors.buttonBasic, PcShape.small))
+                Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+                    Wheel(PERIODS, period, { period = it }, width = 140.dp)
+                    Wheel(HOURS, hourIndex, { hourIndex = it }, width = 140.dp)
+                    Wheel(MINUTES, minuteIndex, { minuteIndex = it }, width = 140.dp)
                 }
             }
-            FieldLabel("분")
-            Row {
-                MINUTES.forEach { m -> Choice("%02d".format(m), selected = m == minute) { minute = m } }
-            }
             Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.m)) {
-                PcButton("취소", onDismiss, kind = ButtonKind.BASIC, size = ButtonSize.MEDIUM, modifier = Modifier.width(CELL * 2))
-                PcButton("확인", { onConfirm(LocalTime.of(hour, minute)) }, kind = ButtonKind.FILLED, size = ButtonSize.MEDIUM, modifier = Modifier.width(CELL * 4 - PcSpacing.m))
+                PcButton("취소", onDismiss, kind = ButtonKind.BASIC, size = ButtonSize.MEDIUM, modifier = Modifier.weight(1f))
+                PcButton("확인", { onConfirm(chosen) }, kind = ButtonKind.FILLED, size = ButtonSize.MEDIUM, modifier = Modifier.weight(2f))
             }
         }
     }
 }
 
+/** 위아래로 돌려 가운데 칸을 고르는 휠. 멈추면 가장 가까운 칸에 맞춰 서고, 칸을 누르면 그 값으로 돌아간다. */
 @Composable
-private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
+fun Wheel(items: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit, width: Dp) {
+    val state = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+    val scope = rememberCoroutineScope()
+    val itemPx = with(androidx.compose.ui.platform.LocalDensity.current) { ITEM_HEIGHT.toPx() }
+    val center by remember {
+        derivedStateOf {
+            (state.firstVisibleItemIndex + if (state.firstVisibleItemScrollOffset > itemPx / 2) 1 else 0).coerceIn(0, items.lastIndex)
+        }
+    }
+    LaunchedEffect(state.isScrollInProgress) {
+        if (!state.isScrollInProgress && center != selectedIndex) onSelect(center)
+    }
     val colors = PcTheme.colors
-    Box(Modifier.size(CELL).padding(4.dp), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .size(CELL - 8.dp)
-                .semantics { this.selected = selected }
-                .pressable(onClick = onClick)
-                .background(if (selected) colors.buttonFilled else colors.buttonBasic, PcShape.small),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(label, style = PcTheme.type.bodyStrong, color = if (selected) colors.onButtonFilled else colors.textPrimary)
+    LazyColumn(
+        state = state,
+        flingBehavior = rememberSnapFlingBehavior(state),
+        // 처음·끝 값도 가운데 줄에 올 수 있게 위아래로 두 칸씩 비운다
+        contentPadding = PaddingValues(vertical = ITEM_HEIGHT * (VISIBLE_ITEMS / 2)),
+        modifier = Modifier.width(width).height(ITEM_HEIGHT * VISIBLE_ITEMS),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        itemsIndexed(items) { index, label ->
+            Box(
+                Modifier.height(ITEM_HEIGHT).fillMaxWidth().pressable(onClick = { scope.launch { state.animateScrollToItem(index) } }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    style = if (index == center) PcTheme.type.title else PcTheme.type.bodyLarge,
+                    color = if (index == center) colors.textPrimary else colors.textTertiary,
+                )
+            }
         }
     }
 }
+
+internal fun roundDownToStep(time: LocalTime): LocalTime = time.withMinute(time.minute / MINUTE_STEP * MINUTE_STEP).withSecond(0).withNano(0)
+
+internal fun toTime(period: Int, hourIndex: Int, minuteIndex: Int): LocalTime =
+    LocalTime.of(hourIndex + if (period == 1) 12 else 0, minuteIndex * MINUTE_STEP)
 
 /** "오후 6시 30분"처럼 읽기 쉬운 시각. 정각이면 분을 뺀다. */
 fun timeLabel(time: LocalTime): String {
