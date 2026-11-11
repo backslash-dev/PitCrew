@@ -5,6 +5,8 @@ import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.ui.components.ButtonKind
 import ai.pitcrew.app.ui.components.ButtonSize
 import ai.pitcrew.app.ui.components.DatePickerDialog
+import ai.pitcrew.app.ui.components.TimePickerDialog
+import ai.pitcrew.app.ui.components.timeLabel
 import ai.pitcrew.app.ui.components.FieldLabel
 import ai.pitcrew.app.ui.components.PcButton
 import ai.pitcrew.app.ui.components.PcTextField
@@ -28,6 +30,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,7 +38,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import java.time.LocalDate
@@ -65,6 +67,7 @@ fun ReservationEditScreen(
     var selected by rememberSaveable { mutableStateOf(reservation?.companionIds.orEmpty()) }
     var showError by rememberSaveable { mutableStateOf(false) }
     var pickingDate by rememberSaveable { mutableStateOf(false) }
+    var pickingTime by rememberSaveable { mutableStateOf(false) }
     val time = LocalDateTime.parse(timeText)
     // 새로 잡거나 시각을 바꾼 예약이 이미 지났으면 저장하지 않는다. 기존 예약을 그대로 두고 다른 항목만 고치는 것은 허용한다
     val pastTime = time.isBefore(now.truncatedTo(ChronoUnit.MINUTES)) && time != reservation?.time
@@ -106,17 +109,23 @@ fun ReservationEditScreen(
             }
             Column {
                 FieldLabel("시각")
-                // 시와 분을 따로 바꿔 날짜가 의도치 않게 넘어가지 않게 한다
-                Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.xxl), verticalAlignment = Alignment.CenterVertically) {
-                    Stepper(
-                        "%02d시".format(time.hour),
-                        onDecrease = { timeText = time.withHour((time.hour + 23) % 24).toString(); showError = false },
-                        onIncrease = { timeText = time.withHour((time.hour + 1) % 24).toString(); showError = false },
-                    )
-                    Stepper(
-                        "%02d분".format(time.minute),
-                        onDecrease = { timeText = time.withMinute((time.minute + 50) % 60).toString(); showError = false },
-                        onIncrease = { timeText = time.withMinute((time.minute + 10) % 60).toString(); showError = false },
+                PcButton(
+                    timeLabel(time.toLocalTime()),
+                    { pickingTime = true },
+                    kind = ButtonKind.BASIC,
+                    size = ButtonSize.MEDIUM,
+                    icon = Icons.Rounded.Schedule,
+                    modifier = Modifier.widthIn(min = 420.dp),
+                )
+                if (pickingTime) {
+                    TimePickerDialog(
+                        selected = time.toLocalTime(),
+                        onConfirm = {
+                            timeText = time.toLocalDate().atTime(it).toString()
+                            showError = false
+                            pickingTime = false
+                        },
+                        onDismiss = { pickingTime = false },
                     )
                 }
                 if (showError && pastTime) {

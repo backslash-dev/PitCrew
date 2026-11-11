@@ -22,3 +22,13 @@ class DatePickerTest {
         december.forEach { assertEquals(7, it.size) }
     }
 }
+
+class TimeLabelTest {
+    @Test
+    fun `시각은 오전·오후와 12시간제로 읽고 정각은 분을 뺀다`() {
+        assertEquals("오전 12시", timeLabel(java.time.LocalTime.of(0, 0)))
+        assertEquals("오전 9시 30분", timeLabel(java.time.LocalTime.of(9, 30)))
+        assertEquals("오후 12시 10분", timeLabel(java.time.LocalTime.of(12, 10)))
+        assertEquals("오후 6시", timeLabel(java.time.LocalTime.of(18, 0)))
+    }
+}
