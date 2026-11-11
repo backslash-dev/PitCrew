@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -149,7 +150,14 @@ fun Stepper(
         horizontalArrangement = Arrangement.spacedBy(PcSpacing.l),
     ) {
         PcButton(decreaseLabel, onDecrease, size = ButtonSize.MEDIUM, modifier = Modifier.width(140.dp), enabled = decreaseEnabled)
-        Text(value, style = PcTheme.type.headline, color = PcTheme.colors.textPrimary, modifier = Modifier.width(valueWidth), maxLines = 1)
+        Text(
+            value,
+            style = PcTheme.type.headline,
+            color = PcTheme.colors.textPrimary,
+            modifier = Modifier.width(valueWidth),
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
         PcButton(increaseLabel, onIncrease, size = ButtonSize.MEDIUM, modifier = Modifier.width(140.dp), enabled = increaseEnabled)
     }
 }
