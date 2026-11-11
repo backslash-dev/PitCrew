@@ -14,7 +14,7 @@ export class HttpError extends Error {
 
 export const notFound = (what: string) => new HttpError(404, 'NOT_FOUND', `${what}을(를) 찾을 수 없습니다`);
 
-/** 응답 형태를 { error: { code, message } }로 통일한다. 내부 오류 내용은 밖으로 내보내지 않는다. */
+/** 내부 오류 내용은 밖으로 내보내지 않는다. */
 export function registerErrorHandler(app: FastifyInstance) {
   app.setErrorHandler((error: FastifyError | Error, request, reply) => {
     if (error instanceof HttpError) {

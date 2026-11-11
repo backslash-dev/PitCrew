@@ -22,7 +22,7 @@ export const contactRoutes: FastifyPluginAsync<Deps> = async (app, { db }) => {
     return { contacts: rows.map(toJson) };
   });
 
-  // 앱이 만든 id로 저장한다. 같은 요청을 다시 보내도 결과가 같다
+  // 앱이 만든 id로 저장해 다시 보내도 결과가 같다
   app.put('/contacts/:id', async (request) => {
     const { id } = Params.parse(request.params);
     const body = ContactBody.parse(request.body);

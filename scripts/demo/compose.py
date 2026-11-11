@@ -1,4 +1,4 @@
-"""record.py가 찍은 장면들에 자막을 입혀 시연 영상 하나로 합친다. 별도 카드 없이 실제 화면만 쓴다.
+"""record.py가 찍은 장면들에 자막을 입혀 시연 영상 하나로 합친다.
 
 이 맥의 ffmpeg에는 자막 필터(libass)가 없어 자막을 PNG로 그려 overlay로 얹는다.
 사용: python3 scripts/demo/compose.py <녹화 폴더>
@@ -16,13 +16,11 @@ W, H, FPS = 1920, 1080, 30
 FONT = "/System/Library/Fonts/AppleSDGothicNeo.ttc"
 MEDIUM, BOLD = 2, 6
 
-# 장면 전환이 늘어지지 않게 기본으로 빠르게 재생하고, 기다리는 구간이 긴 장면은 더 빠르게 한다
 DEFAULT_SPEED = 1.3
 SPEED = {"03-route": 2.2, "05-pickup": 1.6, "06-undo": 1.6, "04-late": 1.4, "07-routine": 1.4, "08-followup": 1.4, "09-battery": 1.4}
-# 마지막 자막 뒤로 이만큼만 남기고 자른다
 TAIL_SECONDS = 2.2
 MIN_SUBTITLE_SECONDS = 2.2
-# 자막 뒤에 보여 줄 화면 동작(상세 화면 열기)이 있는 장면은 자르지 않는다
+# 자막 뒤에 상세 화면을 여는 장면이라 자르지 않는다
 NO_TRIM = {"10-parked"}
 SCENE_NOTE = {
     "02-home": "출발 전 · 오늘 예약과 늦으면 알릴 일행을 PitCrew가 알고 있어요",
@@ -48,7 +46,6 @@ def wrap(text: str, f: ImageFont.FreeTypeFont, width: int) -> list[str]:
 
 
 def subtitle(path: Path, speaker: str | None, text: str) -> Path:
-    """화면 하단 자막. 반투명 어두운 판에 흰 글자, 화자는 흐린 글자로 앞에 둔다."""
     body = font(40, MEDIUM)
     label = font(30, BOLD)
     lines = wrap(text, body, 1500)
@@ -74,7 +71,6 @@ def subtitle(path: Path, speaker: str | None, text: str) -> Path:
 
 
 def chip(path: Path, title: str) -> Path:
-    """장면 이름. 화면 왼쪽 위에 작게 둔다."""
     im = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
     t = font(34, BOLD)
@@ -124,7 +120,6 @@ def main() -> None:
         events = [dict(e, t=e["t"] / speed) for e in scene["events"]]
         if name in SCENE_NOTE:
             events.insert(0, {"t": 0.3, "kind": "caption", "text": SCENE_NOTE[name]})
-        # 자막이 겹치지 않게 앞 자막을 최소 시간만큼 보여 준 뒤 다음 자막을 띄운다
         starts: list[float] = []
         for i, e in enumerate(events):
             start = e["t"]
@@ -134,7 +129,6 @@ def main() -> None:
             if starts:
                 start = max(start, starts[-1] + MIN_SUBTITLE_SECONDS)
             starts.append(start)
-        # 마지막 자막 뒤로 조금만 남기고 자르되 원본 길이는 넘지 않는다
         if name not in NO_TRIM:
             length = min(full, max((starts[-1] if starts else 0) + MIN_SUBTITLE_SECONDS + TAIL_SECONDS, 4.0))
         for i, e in enumerate(events):

@@ -25,7 +25,6 @@ export const storeJson = (row: StoreRow) => ({
   prepMinutes: row.prep_minutes,
 });
 
-/** 경로상 매장 후보. 실제 경로 기반 POI 검색 전까지 카탈로그를 우회 시간 순으로 준다. */
 export const storeRoutes: FastifyPluginAsync<Deps> = async (app, { db }) => {
   app.get('/stores', async (request) => {
     const { name } = Query.parse(request.query);

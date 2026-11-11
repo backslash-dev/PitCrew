@@ -8,7 +8,7 @@ import android.util.Log
 import kotlinx.coroutines.launch
 import org.json.JSONException
 
-/** schema.json의 component "service" 함수는 sendBroadcast로 들어온다. 주행 중에도 화면 없이 처리된다. */
+/** component "service" 함수는 sendBroadcast로 들어와 주행 중에도 화면 없이 처리된다. */
 class GleoActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val app = context.applicationContext as PitCrewApplication

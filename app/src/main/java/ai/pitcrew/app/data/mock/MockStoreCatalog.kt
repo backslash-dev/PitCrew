@@ -3,7 +3,6 @@ package ai.pitcrew.app.data.mock
 import ai.pitcrew.app.data.StoreCatalog
 import ai.pitcrew.app.domain.Store
 
-/** 경로상 매장 검색의 목업. 서버 단계에서 실제 POI 검색으로 교체한다. */
 class MockStoreCatalog(private val stores: List<Store> = DEFAULT_STORES) : StoreCatalog {
     override suspend fun findOnRoute(storeName: String?): Store? {
         val query = storeName?.replace(" ", "")?.takeIf { it.isNotBlank() }

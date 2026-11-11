@@ -7,7 +7,7 @@ import ai.pitcrew.app.domain.NearbyRestaurant
 import ai.pitcrew.app.domain.PastOrder
 import java.time.LocalDateTime
 
-/** 경로상 충전소 검색의 목업. 서버 카탈로그와 같은 값을 쓴다. */
+/** 서버 카탈로그와 같은 값을 쓴다. */
 class MockChargerCatalog(private val chargers: List<Charger> = DEFAULT_CHARGERS) : ChargerCatalog {
     override suspend fun onRoute(): List<Charger> = chargers.sortedBy { it.detourMinutes }
 
@@ -28,7 +28,7 @@ class MockChargerCatalog(private val chargers: List<Charger> = DEFAULT_CHARGERS)
     }
 }
 
-/** 서버 없이 시연할 때의 주문 이력. 최근 사흘 지금 시간대에 같은 메뉴를 픽업한 것으로 둔다. */
+/** 최근 사흘 지금 시간대에 같은 메뉴를 픽업한 것으로 둔다. */
 class MockOrderHistory(private val orders: List<PastOrder>) : OrderHistory {
     override suspend fun recent(): List<PastOrder> = orders
 

@@ -17,7 +17,7 @@ class AppPreferences(context: Context) {
     }
 
     private val _proactive = MutableStateFlow(prefs.getBoolean(KEY_PROACTIVE, true))
-    /** 늦음·배터리 부족·단골 메뉴를 PitCrew가 먼저 묻는지. */
+    /** 늦음·배터리 부족·단골 메뉴를 먼저 묻는지. */
     val proactive: StateFlow<Boolean> = _proactive.asStateFlow()
 
     fun setProactive(value: Boolean) {

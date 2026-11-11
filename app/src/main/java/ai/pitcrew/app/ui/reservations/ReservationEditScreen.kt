@@ -69,7 +69,7 @@ fun ReservationEditScreen(
     var pickingDate by rememberSaveable { mutableStateOf(false) }
     var pickingTime by rememberSaveable { mutableStateOf(false) }
     val time = LocalDateTime.parse(timeText)
-    // 새로 잡거나 시각을 바꾼 예약이 이미 지났으면 저장하지 않는다. 기존 예약을 그대로 두고 다른 항목만 고치는 것은 허용한다
+    // 지난 시각으로 잡거나 옮기는 것만 막고, 시각을 그대로 둔 수정은 허용한다
     val pastTime = time.isBefore(now.truncatedTo(ChronoUnit.MINUTES)) && time != reservation?.time
 
     Column(Modifier.fillMaxSize().padding(horizontal = PcSpacing.screen)) {
@@ -186,11 +186,10 @@ fun ReservationEditScreen(
 
 private const val MAX_DAYS_AHEAD = 60L
 
-/** 오늘부터 두 달까지. 이미 지난 날짜의 기존 예약을 고칠 때는 그 날짜부터 고를 수 있다. */
+/** 이미 지난 기존 예약을 고칠 때는 그 날짜부터 고를 수 있다. */
 internal fun dateRange(today: LocalDate, existing: LocalDate?): ClosedRange<LocalDate> =
     minOf(today, existing ?: today)..today.plusDays(MAX_DAYS_AHEAD)
 
-/** "오늘 11월 11일 (수)", "내일 …"처럼 가까운 날은 앞에 붙인다. */
 internal fun dateButtonLabel(date: LocalDate, today: LocalDate): String {
     val base = "${date.monthValue}월 ${date.dayOfMonth}일 (${date.format(WEEKDAY)})"
     return when (date) {

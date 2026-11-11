@@ -5,7 +5,7 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
 const EnvSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-    // 에뮬레이터는 10.0.2.2로 호스트 루프백에 붙으므로 로컬 개발은 127.0.0.1로 충분하다
+    // 에뮬레이터는 10.0.2.2로 호스트 루프백에 붙으므로 127.0.0.1로 충분하다
     HOST: z.string().min(1).default('127.0.0.1'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -21,7 +21,7 @@ const EnvSchema = z
     message: '운영 환경에서는 API_TOKEN이 필요합니다',
     path: ['API_TOKEN'],
   })
-  // NODE_ENV를 빠뜨리고 외부에 열어도 인증 없이 공개되지 않게, 루프백이 아닌 주소에서는 토큰을 요구한다
+  // NODE_ENV를 빠뜨려도 루프백이 아닌 주소는 인증 없이 열리지 않게 한다
   .refine((env) => LOOPBACK.has(env.HOST) || env.API_TOKEN !== undefined, {
     message: '외부에 여는 HOST에서는 API_TOKEN이 필요합니다',
     path: ['API_TOKEN'],

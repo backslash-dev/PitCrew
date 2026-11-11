@@ -17,7 +17,7 @@ object PcTheme {
     val type: PcTypography get() = PcTypography
 }
 
-/** 차량 테마(라이트·다크)를 따른다. Material은 텍스트 필드 등 기본 컴포넌트 색만 맞춘다. */
+/** Material은 텍스트 필드 등 기본 컴포넌트 색만 맞춘다. */
 @Composable
 fun PitCrewTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
     val colors = if (darkTheme) DarkPcColors else LightPcColors

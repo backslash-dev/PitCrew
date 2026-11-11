@@ -29,15 +29,12 @@ import java.time.format.DateTimeFormatter
 private const val TAG = "RemoteRepositories"
 private val INSTANT_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX")
 
-/** 기기 시간대의 시각을 서버가 받는 오프셋 포함 ISO-8601로 바꾼다. */
 fun LocalDateTime.toInstantString(zone: ZoneId = ZoneId.systemDefault()): String = atZone(zone).format(INSTANT_FORMAT)
 
 fun String.toLocalDateTime(zone: ZoneId = ZoneId.systemDefault()): LocalDateTime =
     OffsetDateTime.parse(this).atZoneSameInstant(zone).toLocalDateTime()
 
-/**
- * 화면은 바로 바뀌고 서버 저장은 뒤에서 한다. 저장에 실패하면 서버 상태로 다시 맞추고 [error]로 알린다.
- */
+/** 화면을 먼저 바꾸고, 저장에 실패하면 서버 상태로 다시 맞춘 뒤 [error]로 알린다. */
 private abstract class SyncedList<T>(private val scope: CoroutineScope) {
     protected val items = MutableStateFlow<List<T>>(emptyList())
     protected val lastError = MutableStateFlow<String?>(null)

@@ -7,7 +7,7 @@ import android.content.Intent
 import android.util.Log
 
 /**
- * debug 빌드 전용. 에뮬레이터에서 마이크 없이 먼저 묻기를 시연·검증한다.
+ * debug 빌드 전용. 에뮬레이터에서 마이크 없이 먼저 묻기를 시연한다.
  * adb shell am broadcast -a ai.pitcrew.app.debug.CHECK_NOW -n ai.pitcrew.app/.debug.DebugVoiceReceiver
  * adb shell am broadcast -a ai.pitcrew.app.debug.ANSWER --es text 응 -n ai.pitcrew.app/.debug.DebugVoiceReceiver
  * adb shell am broadcast -a ai.pitcrew.app.debug.PERIODIC --ez on false -n ai.pitcrew.app/.debug.DebugVoiceReceiver

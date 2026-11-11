@@ -2,7 +2,7 @@ package ai.pitcrew.app.platform
 
 import android.content.Context
 
-/** SDK는 처음 쓸 때 시작한다. Gleo 방송으로 깨어난 경우 필요한 SDK만 연결해 응답 시간을 줄인다. */
+/** Gleo 방송으로 깨어났을 때 응답 시간을 줄이려고 SDK는 처음 쓸 때 시작한다. */
 class PlatformServices(context: Context) : AutoCloseable {
     private val appContext = context.applicationContext
     private val started = mutableListOf<AutoCloseable>()

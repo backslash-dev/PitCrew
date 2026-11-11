@@ -109,7 +109,6 @@ describe('예약', () => {
     expect(reverted.json().reservedAt).toBe('2026-11-05T10:00:00.000Z');
     const [rows] = await ctx.db.query('SELECT status FROM reservation_changes WHERE id = ?', [changeId]);
     expect(rows).toEqual([{ status: 'REVERTED' }]);
-    // 응답을 잃고 다시 보낸 경우라 성공으로 보고 현재 예약을 돌려준다
     const again = await post(`/v1/reservation-changes/${changeId}/revert`, {});
     expect(again.statusCode).toBe(200);
     expect(again.json().reservedAt).toBe('2026-11-05T10:00:00.000Z');

@@ -40,7 +40,7 @@ import java.time.YearMonth
 private val WEEKDAYS = listOf("일", "월", "화", "수", "목", "금", "토")
 private val CELL = 80.dp
 
-/** 한 달 달력에서 날짜를 고른다. [range] 밖의 날짜는 고를 수 없다. 고르면 바로 닫는다(차량 입력 최소화). */
+/** 고르면 바로 닫는다(차량 입력 최소화). */
 @Composable
 fun DatePickerDialog(
     selected: LocalDate,
@@ -129,7 +129,7 @@ private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, enabled:
     }
 }
 
-/** 일요일부터 시작하는 주 단위 칸. 이번 달이 아닌 칸은 null. */
+/** 일요일부터 시작하는 주 단위 칸. */
 internal fun monthWeeks(month: YearMonth): List<List<LocalDate?>> {
     val first = month.atDay(1)
     val leading = first.dayOfWeek.value % DayOfWeek.entries.size

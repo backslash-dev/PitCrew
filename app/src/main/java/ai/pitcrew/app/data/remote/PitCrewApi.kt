@@ -17,10 +17,10 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** 서버가 준 오류. [message]는 서버의 한국어 안내를 그대로 쓴다. */
+/** [message]는 서버의 한국어 안내 그대로다. */
 class ApiException(val status: Int, val code: String, message: String) : IOException(message)
 
-/** PitCrew 서버 HTTP 클라이언트. 응답 대기는 Gleo 응답 예산을 넘지 않게 짧게 둔다. */
+/** 응답 대기는 Gleo 응답 예산을 넘지 않게 짧게 둔다. */
 class PitCrewApi(
     baseUrl: String,
     private val apiToken: String = "",
@@ -84,7 +84,6 @@ class PitCrewApi(
     }
 }
 
-/** 네트워크·서버 오류를 사용자 문장으로 바꾼다. */
 fun Throwable.userMessage(): String = when (this) {
     is ApiException -> message ?: "서버 오류가 발생했어요"
     is JSONException -> "서버 응답을 읽지 못했어요"

@@ -42,10 +42,7 @@ const toJson = (row: Pick<OrderRow, 'id' | 'store_id' | 'store_name' | 'store_br
   createdAt: row.created_at.toISOString(),
 });
 
-/**
- * 주문 상태: PENDING(매장 응답 대기) → ACCEPTED | REJECTED | UNKNOWN(응답 없음), ACCEPTED → CANCELLING → CANCELLED.
- * 매장 호출은 트랜잭션 밖에서 하고, 호출 전후로 상태를 기록해 매장과 DB가 어긋나도 흔적이 남게 한다.
- */
+/** 외부 호출은 트랜잭션 밖에서 하고 전후로 상태를 기록해, 어긋나도 흔적을 남긴다. */
 export const orderRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways, gatewayTimeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS }) => {
   app.post('/orders', async (request, reply) => {
     const body = OrderBody.parse(request.body);
@@ -86,14 +83,13 @@ export const orderRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways,
     });
   });
 
-  /** 최근 주문 이력. 앱이 자주 시키는 메뉴(단골 루틴)를 찾는 근거로 쓴다. */
   app.get('/orders', async (request) => {
     const { limit } = ListQuery.parse(request.query);
     const [rows] = await db.query<OrderRow[]>(`${SELECT_ORDERS} ORDER BY o.pickup_at DESC LIMIT ?`, [limit]);
     return { orders: rows.map(toJson) };
   });
 
-  /** 이미 취소된 주문을 다시 취소하면(응답 유실 뒤 재시도) 성공으로 본다. */
+  /** 응답 유실 뒤 재시도일 수 있어 이미 취소됐으면 성공으로 본다. */
   app.post('/orders/:id/cancel', async (request) => {
     const { id } = Params.parse(request.params);
     const order = await claim(id);
@@ -121,7 +117,7 @@ export const orderRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways,
     return toJson({ ...order, status: 'CANCELLED' });
   });
 
-  // 취소를 진행할 권리를 잡는다. 동시에 두 번 취소해도 매장에는 한 번만 요청한다
+  // 동시에 두 번 취소해도 매장에는 한 번만 요청한다
   async function claim(id: string): Promise<OrderRow> {
     const connection = await db.getConnection();
     try {

@@ -31,7 +31,6 @@ import java.util.UUID
 
 private val MOBILE = Regex("""^01[016789]-?\d{3,4}-?\d{4}$""")
 
-/** 숫자만 받아 010-1234-5678 형태로 맞춘다. 형식이 아니면 null. */
 internal fun normalizePhone(input: String): String? {
     val trimmed = input.trim()
     if (!MOBILE.matches(trimmed)) return null

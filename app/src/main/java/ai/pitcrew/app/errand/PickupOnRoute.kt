@@ -21,7 +21,7 @@ import java.time.temporal.ChronoUnit
 object PickupPlanner {
     private const val ROUND_MINUTES = 5L
 
-    /** 매장이 경로 중간쯤에 있다고 보고, 도착과 조리 완료 중 늦은 시각을 5분 단위로 올린다. */
+    /** 매장이 경로 중간쯤에 있다고 가정한다. */
     fun readyAt(store: Store, now: LocalDateTime, remainSeconds: Int): LocalTime {
         val arriveAtStore = now.plusSeconds(remainSeconds.coerceAtLeast(0) / 2L).plusMinutes(store.detourMinutes.toLong())
         val prepared = now.plusMinutes(store.prepMinutes.toLong())
@@ -39,7 +39,6 @@ sealed interface PickupOutcome {
     data class Finished(val errand: Errand) : PickupOutcome
 }
 
-/** 경로상 픽업 주문. Gleo·앱 음성 입력·매장 변경이 같이 쓴다. */
 class PickupUseCase(
     private val fetchDestination: suspend () -> Destination?,
     private val stores: StoreCatalog,
@@ -51,12 +50,10 @@ class PickupUseCase(
         return order(item, store, confirmed, channel)
     }
 
-    /** 승인 전 제안의 매장을 바꾼다. 픽업 시각은 새 매장 기준으로 다시 계산한다. */
     suspend fun switchStore(item: String, store: Store): PickupOutcome = order(item, store, confirmed = false, channel = ApprovalChannel.TOUCH)
 
     suspend fun candidates(): List<Store> = stores.candidatesOnRoute()
 
-    /** 자주 시키는 메뉴를 PitCrew가 먼저 제안한다. */
     suspend fun suggest(item: String, store: Store): PickupOutcome =
         order(item, store, confirmed = false, channel = ApprovalChannel.VOICE, origin = ErrandOrigin.SUGGESTED)
 
@@ -72,12 +69,12 @@ class PickupUseCase(
         } catch (e: SdkUnavailableException) {
             return PickupOutcome.NavigationUnavailable
         } ?: return PickupOutcome.NoRoute
-        // 화면에서 이미 승인한 뒤 Gleo에도 "응"이라고 한 경우·Gleo 재시도: 같은 메뉴를 방금 주문했으면 다시 주문하지 않는다
+        // 화면 승인 뒤 Gleo "응"·재시도로 같은 메뉴를 다시 주문하지 않게 한다
         if (confirmed) {
             errands.errands.value.firstOrNull { (it.detail as? ErrandDetail.Pickup)?.item == item && it.handledRecently(now()) }
                 ?.let { return PickupOutcome.Finished(it) }
         }
-        // 같은 메뉴를 먼저 물은 제안이 없으면 확인이 붙어 와도(Gleo가 첫 요청부터 confirmed를 붙인 경우) 다시 묻는다
+        // Gleo가 첫 요청부터 confirmed를 붙이기도 해, 먼저 물은 제안이 없으면 다시 묻는다
         val asked = errands.errands.value.any {
             it.state == ErrandState.AWAITING_APPROVAL && (it.detail as? ErrandDetail.Pickup)?.item == item
         }

@@ -63,7 +63,6 @@ fun Hairline(modifier: Modifier = Modifier) {
     Box(modifier.fillMaxWidth().height(1.dp).background(PcTheme.colors.divider))
 }
 
-/** 숫자 중심 지표. 라벨은 작고 흐리게, 값은 크게. */
 @Composable
 fun KeyFigure(label: String, value: String, modifier: Modifier = Modifier, tone: Tone = Tone.NEUTRAL, large: Boolean = false) {
     val colors = PcTheme.colors

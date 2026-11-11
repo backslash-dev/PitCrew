@@ -6,10 +6,7 @@ import mysql, { type RowDataPacket } from 'mysql2/promise';
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
 const LOCK_NAME = 'pitcrew_migrate';
 
-/**
- * migrations/의 NNN_*.sql을 번호 순으로 한 번씩 적용한다.
- * 여러 인스턴스가 동시에 떠도 GET_LOCK으로 한 곳만 적용한다. MySQL DDL은 트랜잭션이 안 되므로 파일 단위로 기록한다.
- */
+/** MySQL DDL은 트랜잭션이 안 돼 파일 단위로 기록한다. */
 export async function migrate(url: string, log: (message: string) => void = () => {}): Promise<string[]> {
   const connection = await mysql.createConnection({ uri: url, multipleStatements: true, timezone: 'Z' });
   try {

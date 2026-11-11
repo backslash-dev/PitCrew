@@ -126,11 +126,7 @@ class NavigationClient(context: Context) : AutoCloseable {
         runCatching { navi.getWaypointInfo() }.onFailure { Log.w(TAG, "waypoint query failed", it) }
     }
 
-    /**
-     * 내비에 현재 목적지를 물어 응답을 기다린다. 경로가 없으면 null.
-     * 내비가 답하지 않으면 기다리지 않고 연결 실패로 본다. 응답이 없을 때 호출한 쪽(먼저 묻기·Gleo)이 멈추지 않게 한다.
-     * @throws SdkUnavailableException 내비 SDK 초기화에 실패했거나 제한 시간 안에 답이 없을 때
-     */
+    /** 내비가 답하지 않으면 호출한 쪽이 멈추지 않게 [SdkUnavailableException]으로 끝낸다. */
     suspend fun fetchDestination(): Destination? {
         // Gleo 방송으로 앱이 막 깨어났으면 SDK 연결에 몇 초 걸리므로 연결 대기와 응답 대기를 따로 잰다
         val status = withTimeoutOrNull(CONNECT_MILLIS) { status.first { it != SdkStatus.Connecting } }
@@ -149,7 +145,7 @@ class NavigationClient(context: Context) : AutoCloseable {
     // 경로 없음(null)과 시간 초과(null)를 구분하려고 감싼다
     private class Reply(val destination: Destination?)
 
-    /** 목적지로 경로 안내를 요청한다. 결과 콜백이 없어 요청이 예외 없이 전달됐는지만 확인한다. */
+    /** 결과 콜백이 없어 요청이 예외 없이 전달됐는지만 확인한다. */
     fun requestRoute(name: String, latitude: Double, longitude: Double): Boolean {
         if (_status.value != SdkStatus.Ready) return false
         return runCatching {
@@ -157,7 +153,7 @@ class NavigationClient(context: Context) : AutoCloseable {
         }.onFailure { Log.w(TAG, "request route failed", it) }.isSuccess
     }
 
-    /** 경유지 추가는 결과 콜백이 없어 요청이 예외 없이 전달됐는지만 확인한다. 실패는 onError로 로그에 남는다. */
+    /** 결과 콜백이 없어 실패는 onError 로그로만 남는다. */
     fun addWaypoint(name: String, latitude: Double, longitude: Double): Boolean {
         if (_status.value != SdkStatus.Ready) return false
         return runCatching {
@@ -175,10 +171,7 @@ class NavigationClient(context: Context) : AutoCloseable {
         }.onFailure { Log.w(TAG, "add waypoint failed", it) }.isSuccess
     }
 
-    /**
-     * 추가했던 경유지를 뺀다. SDK는 순번(첫째·둘째)으로만 지우므로 현재 경유지 목록에서 위치를 찾는다.
-     * 목록에 없으면 이미 빠진 것으로 본다. 목록을 받지 못했거나 셋째 이후면 false.
-     */
+    /** SDK가 순번(첫째·둘째)으로만 지워 현재 목록에서 위치를 찾는다. 셋째 이후면 false. */
     suspend fun removeWaypoint(name: String, latitude: Double, longitude: Double): Boolean {
         if (_status.value != SdkStatus.Ready) return false
         val current = withTimeoutOrNull(WAYPOINT_REPLY_MILLIS) {

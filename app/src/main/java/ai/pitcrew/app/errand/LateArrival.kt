@@ -32,7 +32,7 @@ data class LateArrivalPlan(
 object LateArrivalPlanner {
     private const val PROPOSAL_STEP_MINUTES = 10L
 
-    /** 안내·지연·제안이 같은 값을 쓰도록 도착 시각을 분 단위로 반올림한다. 화면 표시도 이 값을 쓴다. */
+    /** 안내·지연·제안·화면이 같은 값을 쓰도록 분 단위로 반올림한다. */
     fun arrivalAt(now: LocalDateTime, remainSeconds: Int): LocalDateTime =
         now.plusSeconds(remainSeconds.toLong().coerceAtLeast(0) + 30).truncatedTo(ChronoUnit.MINUTES)
 
@@ -46,8 +46,7 @@ object LateArrivalPlanner {
         return LateArrivalPlan(appointment, arrival, delayMinutes, proposed)
     }
 
-    // 시각만 받으므로 지금과 가장 가까운 시점으로 본다. Gleo는 "10시"를 저녁에도 10:00으로 넘긴 적이 있어
-    // 12시 이하 시각은 오전·오후 둘 다 후보로 둔다. 전날·다음 날도 후보라 자정을 넘는 약속도 맞는다
+    // Gleo가 저녁 "10시"도 10:00으로 넘겨 12시 이하는 오전·오후, 전날·다음 날을 모두 후보로 둔다
     private fun nearestOccurrence(time: LocalTime, now: LocalDateTime): LocalDateTime {
         val times = when {
             time.hour < 12 -> listOf(time, time.plusHours(12))
@@ -65,9 +64,7 @@ object LateArrivalPlanner {
     }
 }
 
-/**
- * Gleo는 승인 시각도 12시간제로 헷갈려 넘긴다(01:10을 13:10으로). 제안한 시각과 12시간 차이 나는 두 후보 중 가까운 쪽으로 본다.
- */
+/** Gleo가 승인 시각을 12시간 틀리게 넘기기도 해(01:10→13:10) 제안 시각에 가까운 쪽으로 본다. */
 internal fun closestHalfDay(time: LocalTime, reference: LocalTime): LocalTime {
     fun distance(t: LocalTime): Long {
         val diff = Duration.between(reference, t).abs().toMinutes()
@@ -80,13 +77,11 @@ sealed interface LateArrivalOutcome {
     data object NoRoute : LateArrivalOutcome
     data object NavigationUnavailable : LateArrivalOutcome
     data class OnTime(val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
-    /** 늦지만 그 시각에 등록된 예약이 없어 바꿀 대상이 없다. */
     data class NoReservation(val plan: LateArrivalPlan) : LateArrivalOutcome
     data class AwaitingApproval(val errand: Errand, val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
     data class Finished(val errand: Errand, val plan: LateArrivalPlan, val reservation: Reservation?) : LateArrivalOutcome
 }
 
-/** 지각 판단과 실행. Gleo·앱 음성 입력이 같이 쓴다. */
 class LateArrivalUseCase(
     private val fetchDestination: suspend () -> Destination?,
     private val errands: ErrandService,
@@ -94,10 +89,7 @@ class LateArrivalUseCase(
     private val contacts: ContactRepository,
     private val now: () -> LocalDateTime = LocalDateTime::now,
 ) {
-    /**
-     * [approvedTime]이 있으면 사용자가 그 시간으로 승인한 것으로 보고 바로 실행한다.
-     * 단, 이 예약에 대해 먼저 물은 제안이 없으면(Gleo가 첫 요청부터 확인을 붙여 보낸 경우) 승인으로 보지 않고 다시 묻는다.
-     */
+    /** Gleo가 첫 요청부터 확인을 붙여 보내기도 해, 먼저 물은 제안이 없으면 다시 묻는다. */
     suspend fun run(appointment: LocalTime, approvedTime: LocalTime? = null, channel: ApprovalChannel = ApprovalChannel.VOICE): LateArrivalOutcome {
         val destination = try {
             fetchDestination()
@@ -106,8 +98,7 @@ class LateArrivalUseCase(
         } ?: return LateArrivalOutcome.NoRoute
 
         val plan = LateArrivalPlanner.plan(appointment, now(), destination.remainTimeSeconds)
-        // 화면에서 이미 승인했는데 Gleo에도 "응"이라고 한 경우·Gleo 재시도: 같은 약속을 방금 처리했으면 다시 실행하지 않는다.
-        // 예약 시각이 이미 바뀌어 아래 예약 찾기로는 못 찾으므로 먼저 본다
+        // 화면 승인 뒤 Gleo "응"·재시도 중복 방지. 예약 시각이 이미 바뀌어 아래 찾기보다 먼저 본다
         if (approvedTime != null) recentlyHandled(plan.appointment)?.let { return LateArrivalOutcome.Finished(it, plan, null) }
 
         reservations.refreshNow()
@@ -126,7 +117,6 @@ class LateArrivalUseCase(
         return LateArrivalOutcome.Finished(errands.approve(errand.id, channel), plan, reservation)
     }
 
-    /** 경로 감시가 늦음을 알아챘을 때 PitCrew 제안으로 올린다. 늦지 않으면 null. */
     suspend fun suggest(reservation: Reservation, remainSeconds: Int): Errand? {
         contacts.ensureLoaded()
         val plan = LateArrivalPlanner.plan(reservation.time, now(), remainSeconds)
@@ -156,7 +146,6 @@ class LateArrivalUseCase(
         d.appointment == appointment && it.handledRecently(now())
     }
 
-    // 이 예약을 이미 한 번 미뤘고 무르지 않았으면 또 늦는 경우다
     private fun wasRescheduled(reservation: Reservation): Boolean = errands.errands.value.any {
         it.state == ErrandState.COMPLETED && (it.detail as? ErrandDetail.LateArrival)?.reservationId == reservation.id
     }
@@ -223,7 +212,7 @@ class LateArrivalHandler(private val useCase: LateArrivalUseCase) : GleoActionHa
         }
     }
 
-    // 알릴 일행이 없으면 "0 companions"라고 말하지 않게 문장에서 뺀다
+    // 일행이 없으면 "0 companions"라고 말하지 않게 뺀다
     private fun ErrandDetail.LateArrival.notifyClause(verb: String): String = when (companions.size) {
         0 -> ""
         1 -> "$verb 1 companion"

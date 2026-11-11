@@ -38,8 +38,7 @@ class DrivingStateMonitor(private val context: Context) : AutoCloseable {
 
     private val uxListener = CarUxRestrictionsManager.OnUxRestrictionsChangedListener(::onUxRestrictions)
 
-    // 리스너 없는 Car.createCar(context)는 차량 서비스가 재시작되면 앱 프로세스를 죽인다.
-    // 리스너로 재연결을 직접 처리하고, 연결은 기다리지 않아 콜드 스타트를 막지 않는다
+    // 리스너 없는 Car.createCar는 차량 서비스 재시작 시 앱을 죽인다. 연결은 기다리지 않는다
     fun start() {
         runCatching {
             car = Car.createCar(context, null, Car.CAR_WAIT_TIMEOUT_DO_NOT_WAIT) { connected, ready ->

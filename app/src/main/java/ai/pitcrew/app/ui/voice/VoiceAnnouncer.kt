@@ -16,10 +16,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * 음성 안내 담당. 화면 탭으로 승인·되돌린 작업과 PitCrew가 먼저 제안한 작업의 결과, 픽업 매장 도착 직전 안내를 TTS로 말한다.
- * Gleo로 시킨 일은 Gleo가 결과를 직접 말하므로 여기서 다시 말하지 않는다.
- */
+/** Gleo로 시킨 일은 Gleo가 결과를 직접 말하므로 다시 말하지 않는다. */
 class VoiceAnnouncer(
     private val errands: ErrandService,
     private val navigation: NavigationClient,

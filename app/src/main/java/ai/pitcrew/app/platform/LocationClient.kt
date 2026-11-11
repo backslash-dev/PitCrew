@@ -38,7 +38,7 @@ class LocationClient(private val context: Context) : AutoCloseable {
     fun hasPermission(): Boolean =
         context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED
 
-    /** 런타임 권한 허용 후 다시 불러도 된다. 이미 시작했으면 아무것도 하지 않는다. */
+    /** 런타임 권한 허용 후 다시 불러도 된다. */
     fun start() {
         if (started) return
         if (!hasPermission()) {

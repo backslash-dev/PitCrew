@@ -65,7 +65,7 @@ private object Routes {
     const val CONTACT_EDIT = "contact?id={id}"
     val topLevel = listOf(HOME, RESERVATIONS, HISTORY, SETTINGS)
 
-    /** 하위 화면도 속한 탭을 레일에 표시한다. 작업 상세는 홈과 기록 어디서든 열리므로 홈으로 둔다. */
+    /** 작업 상세는 홈과 기록 어디서든 열리므로 홈 탭으로 둔다. */
     fun sectionOf(route: String): String = when {
         route in topLevel -> route
         route.startsWith("reservation") || route.startsWith("contact") -> RESERVATIONS

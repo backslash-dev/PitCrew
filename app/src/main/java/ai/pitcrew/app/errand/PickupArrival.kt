@@ -5,7 +5,7 @@ import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.platform.WaypointStatus
 
-/** 주문한 픽업 매장에 거의 다 왔는지 판단한다. 3.0.5 SDK에는 경유지 도착 이벤트가 없어 남은 시간·거리로 본다. */
+/** 3.0.5 SDK에는 경유지 도착 이벤트가 없어 남은 시간·거리로 판단한다. */
 object PickupArrival {
     const val NEAR_SECONDS = 180
     const val NEAR_METERS = 800
@@ -19,7 +19,6 @@ object PickupArrival {
             }
         }
 
-    /** 경유지까지 추가했고 아직 안내하지 않은 픽업. */
     fun waiting(errands: List<Errand>): List<Errand> = errands.filter {
         it.detail is ErrandDetail.Pickup && it.state == ErrandState.COMPLETED && it.arrivalAnnouncedAt == null
     }

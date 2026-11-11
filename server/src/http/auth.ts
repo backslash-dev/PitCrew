@@ -2,7 +2,6 @@ import { timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { HttpError } from './errors.js';
 
-/** API_TOKEN이 설정돼 있으면 Bearer 토큰을 요구한다. 로컬 개발에서는 비워 둘 수 있다. */
 export function registerAuth(app: FastifyInstance, token: string | undefined) {
   if (!token) return;
   const expected = Buffer.from(token);

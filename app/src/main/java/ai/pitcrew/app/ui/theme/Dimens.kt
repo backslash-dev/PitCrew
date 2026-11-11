@@ -21,7 +21,7 @@ object PcShape {
     val pill = RoundedCornerShape(percent = 50)
 }
 
-/** 창 너비 기준 레이아웃. 1:1 분할창(약 1280dp)과 세로 창에서도 깨지지 않게 한다. */
+/** 1:1 분할창(약 1280dp)과 세로 창에서도 깨지지 않게 한다. */
 enum class WindowWidth { COMPACT, MEDIUM, EXPANDED }
 
 fun windowWidthOf(widthDp: Float): WindowWidth = when {

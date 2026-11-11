@@ -52,10 +52,6 @@ const waitlistJson = (row: Pick<WaitlistRow, 'id' | 'restaurant_id' | 'party_siz
   status: row.status,
 });
 
-/**
- * 경로상 충전소와 걸어갈 수 있는 식당, 식당 원격 줄서기. 실제 충전소·줄서기 API 전까지 카탈로그와 목업 게이트웨이로 동작한다.
- * 줄서기 상태: PENDING → WAITING | REJECTED | UNKNOWN, WAITING → CANCELLING → CANCELLED.
- */
 export const chargingRoutes: FastifyPluginAsync<Deps> = async (app, { db, gateways, gatewayTimeoutMs = DEFAULT_GATEWAY_TIMEOUT_MS }) => {
   app.get('/chargers', async () => {
     const [chargers] = await db.query<ChargerRow[]>(
@@ -121,7 +117,6 @@ export const chargingRoutes: FastifyPluginAsync<Deps> = async (app, { db, gatewa
     });
   });
 
-  /** 이미 취소된 줄서기를 다시 취소하면(응답 유실 뒤 재시도) 성공으로 본다. */
   app.post('/waitlists/:id/cancel', async (request) => {
     const { id } = Params.parse(request.params);
     const waitlist = await claim(id);

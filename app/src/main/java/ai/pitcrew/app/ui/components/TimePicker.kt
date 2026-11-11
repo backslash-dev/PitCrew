@@ -43,7 +43,7 @@ private val PERIODS = listOf("오전", "오후")
 private val HOURS = listOf("12") + (1..11).map { "$it" }
 private val MINUTES = (0 until 60 step MINUTE_STEP).map { "%02d".format(it) }
 
-/** 오전·오후, 시, 분 휠을 돌려 고른다. 분은 5분 단위이고, "확인"을 눌러야 반영한다. */
+/** "확인"을 눌러야 반영한다. */
 @Composable
 fun TimePickerDialog(selected: LocalTime, onConfirm: (LocalTime) -> Unit, onDismiss: () -> Unit) {
     val start = roundDownToStep(selected)
@@ -59,7 +59,6 @@ fun TimePickerDialog(selected: LocalTime, onConfirm: (LocalTime) -> Unit, onDism
         ) {
             Text(timeLabel(chosen), style = PcTheme.type.headline, color = colors.textPrimary)
             Box(contentAlignment = Alignment.Center) {
-                // 가운데 줄이 고른 값임을 보이는 띠
                 Box(Modifier.fillMaxWidth().height(ITEM_HEIGHT).background(colors.buttonBasic, PcShape.small))
                 Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
                     Wheel(PERIODS, period, { period = it }, width = 140.dp)
@@ -75,7 +74,6 @@ fun TimePickerDialog(selected: LocalTime, onConfirm: (LocalTime) -> Unit, onDism
     }
 }
 
-/** 위아래로 돌려 가운데 칸을 고르는 휠. 멈추면 가장 가까운 칸에 맞춰 서고, 칸을 누르면 그 값으로 돌아간다. */
 @Composable
 fun Wheel(items: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit, width: Dp) {
     val state = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
@@ -118,7 +116,6 @@ internal fun roundDownToStep(time: LocalTime): LocalTime = time.withMinute(time.
 internal fun toTime(period: Int, hourIndex: Int, minuteIndex: Int): LocalTime =
     LocalTime.of(hourIndex + if (period == 1) 12 else 0, minuteIndex * MINUTE_STEP)
 
-/** "오후 6시 30분"처럼 읽기 쉬운 시각. 정각이면 분을 뺀다. */
 fun timeLabel(time: LocalTime): String {
     val period = if (time.hour < 12) "오전" else "오후"
     val h12 = (time.hour % 12).let { if (it == 0) 12 else it }

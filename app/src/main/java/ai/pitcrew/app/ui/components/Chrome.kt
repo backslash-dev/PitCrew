@@ -131,7 +131,7 @@ fun SegmentedTabs(options: List<String>, selectedIndex: Int, onSelect: (Int) -> 
     }
 }
 
-/** 키보드 대신 큰 증감 버튼으로 값을 바꾼다(차량 입력 최소화 원칙). */
+/** 키보드 대신 큰 증감 버튼을 쓴다(차량 입력 최소화). */
 @Composable
 fun Stepper(
     value: String,

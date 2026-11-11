@@ -1,6 +1,5 @@
 """디자인 검수용으로 앱의 모든 화면·상태를 캡처한다.
 
-에뮬레이터(화면 없이 실행 가능)·로컬 서버·debug APK가 준비된 상태에서 돌린다. 결과는 출력 폴더의 light/, dark/ 아래에 번호순 PNG로 남는다.
 사용: python3 scripts/demo/capture_design.py [출력 폴더] [driving,parked,dark 중 고를 묶음]
 """
 from __future__ import annotations
@@ -80,7 +79,6 @@ def late_reservation() -> None:
 
 
 def fresh_app(route: bool) -> str:
-    """작업 기록·먼저 묻기 상태를 비우고 앱을 새로 띄운다. 기기 시각(since)을 돌려준다."""
     r.reset_demo_orders()
     late_reservation()
     r.vconsole("park")
@@ -106,7 +104,6 @@ def fresh_app(route: bool) -> str:
 
 
 def suggest(answer: str | None, since: str) -> str | None:
-    """먼저 묻기를 한 번 돌리고, answer가 있으면 답한다. 질문 문장을 돌려준다."""
     asked = None
     for _ in range(4):
         r.debug("CHECK_NOW")
@@ -126,7 +123,7 @@ def suggest(answer: str | None, since: str) -> str | None:
 
 
 def resume_route() -> None:
-    """경유지가 바뀌면 내비가 앞으로 나오고 다시 '안내 시작'을 눌러야 경로가 잡힌다(에뮬레이터 내비). 앱으로 돌아온다."""
+    """에뮬레이터 내비는 경유지가 바뀌면 '안내 시작'을 다시 눌러야 경로가 잡힌다."""
     time.sleep(2)
     r.open_navi()
     time.sleep(3)
@@ -139,7 +136,7 @@ def resume_route() -> None:
 
 
 def shot_on_log(pattern: str, since: str, name: str, timeout: float = 20) -> None:
-    """로그에 pattern이 나오면 바로 찍는다. 화면 트리 덤프는 몇 초씩 걸려 짧은 상태(듣는 중)를 놓친다."""
+    """화면 트리 덤프는 몇 초씩 걸려 짧은 상태(듣는 중)를 놓치므로 로그로 시점을 잡는다."""
     if not r.wait_for(pattern, timeout, since):
         print("  (no log)", pattern)
     time.sleep(1)
@@ -147,7 +144,7 @@ def shot_on_log(pattern: str, since: str, name: str, timeout: float = 20) -> Non
 
 
 def tap_rightmost(text: str, wait: float = 2.0) -> bool:
-    """레일 메뉴와 같은 이름의 탭(예: 예약)이 있을 때 화면 오른쪽 것을 누른다."""
+    """레일 메뉴와 같은 이름의 탭(예: 예약)이 있어 오른쪽 것을 누른다."""
     matches = [(x, y) for label, x, y in nodes() if label == text]
     if not matches:
         print("  (not found)", text)
@@ -183,7 +180,6 @@ def driving_set() -> None:
         shot("D03-driving-awaiting-no-answer")
     r.vconsole("park")
     time.sleep(3)
-    # 주행 중 승인 → 완료 화면: 대기 제안을 거절하고 단골 제안에 "응"으로 답한다
     tap("거절")
     s2 = r.device_time()
     r.vconsole("drive", "60")
@@ -268,7 +264,6 @@ def parked_set() -> None:
     tap("취소")
     back()
 
-    # 서버가 꺼진 채 앱을 띄우면 예약·일행 동기화 실패 안내가 보인다
     server(False)
     r.shell(f"am force-stop --user 10 {r.PKG}")
     r.open_app()

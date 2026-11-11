@@ -6,7 +6,6 @@ import java.time.format.DateTimeFormatter
 private val TIME_PATTERN = Regex("""^([01]?\d|2[0-3]):([0-5]\d)$""")
 private val WIRE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
-/** Gleo가 넘기는 24시간제 "H:mm"/"HH:mm"만 받는다. 형식이 다르면 null. */
 fun parseClockTime(value: String?): LocalTime? {
     val match = TIME_PATTERN.matchEntire(value?.trim() ?: return null) ?: return null
     return LocalTime.of(match.groupValues[1].toInt(), match.groupValues[2].toInt())

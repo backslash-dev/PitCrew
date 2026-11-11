@@ -16,7 +16,6 @@ interface KeyRow extends RowDataPacket {
   response_body: string | null;
 }
 
-/** 요청의 Idempotency-Key 헤더. 없으면 null, 형식이 틀리면 400. */
 export function idempotencyKey(request: FastifyRequest): string | null {
   const value = request.headers['idempotency-key'];
   if (value === undefined) return null;
@@ -26,11 +25,7 @@ export function idempotencyKey(request: FastifyRequest): string | null {
   return value;
 }
 
-/**
- * 같은 키로 다시 온 요청에는 처음 결과를 그대로 돌려준다. 처리 중이면 409, 내용이 다르면 422.
- * 처리 로직이 낸 HttpError도 결과로 저장한다(외부 시스템이 거절했거나 결과를 모르는 경우 다시 보내지 않게).
- * 예상하지 못한 오류(버그·DB 장애)일 때만 키를 지워 다시 시도할 수 있게 한다.
- */
+/** HttpError도 결과로 저장해 재전송을 막고, 예상 못 한 오류일 때만 키를 지운다. */
 export async function idempotent(
   db: Pool,
   request: FastifyRequest,
@@ -78,7 +73,7 @@ function send(reply: FastifyReply, outcome: Outcome) {
   return reply.status(outcome.status).send(outcome.body);
 }
 
-/** 외부 처리는 끝났는데 결과 저장이 실패하면, 재시도로 다시 처리되지 않게 결과 미확인 오류로 남긴다. */
+/** 외부 처리 뒤 저장이 실패하면 재처리되지 않게 결과 미확인으로 남긴다. */
 export async function saveResult(write: () => Promise<unknown>, message: string) {
   try {
     await write();

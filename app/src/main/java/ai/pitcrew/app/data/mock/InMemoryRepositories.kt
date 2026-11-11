@@ -40,7 +40,7 @@ class InMemoryReservationRepository(seed: List<Reservation>) : ReservationReposi
     override fun delete(id: String) = _reservations.update { list -> list.filterNot { it.id == id } }
 }
 
-/** 서버 연동 전 시연용 데이터. 예약 시각은 앱 실행 시각 기준으로 잡아 언제 시연해도 '오늘'이 된다. */
+/** 예약 시각은 앱 실행 시각 기준이라 언제 시연해도 '오늘'이 된다. */
 object SampleData {
     val contacts = listOf(
         Contact("c-minsu", "김민수", "010-2481-3307"),
