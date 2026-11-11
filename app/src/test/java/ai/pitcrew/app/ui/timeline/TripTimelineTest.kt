@@ -24,25 +24,25 @@ class TripTimelineTest {
         val mark = t.marks.single()
         assertEquals(0.4f, mark.fraction, 0.001f)
         assertEquals(30, mark.stops.single().lateMinutes)
-        assertEquals("온담 한식당 11:50 · 30분 늦음", mark.label())
+        assertEquals(TripTimeline.Headline("온담 한식당 11:50에 30분 늦어요", late = true), t.headline())
         assertFalse(t.zoomed)
     }
 
     @Test
-    fun `가까운 지점은 하나로 묶고 범위와 늦는 곳 수로 요약한다`() {
+    fun `가까운 지점은 점 하나로 묶고, 문장은 가장 이른 늦는 약속과 나머지 수로 말한다`() {
         val arrival = now.plusMinutes(50)
         val t = TripTimeline.build(
             now, arrival,
             listOf(
                 reservation("r1", "온담", now.plusMinutes(20)),
-                reservation("r2", "팀 미팅", now.plusMinutes(23)),
-                reservation("r3", "병원", now.plusMinutes(25)),
+                reservation("r2", "팀 미팅", now.plusMinutes(20)),
+                reservation("r3", "병원", now.plusMinutes(21)),
             ),
             emptyList(),
         )
         val mark = t.marks.single()
         assertTrue(mark.cluster)
-        assertEquals("11:50~11:55 · 3곳 늦음", mark.label())
+        assertEquals(TripTimeline.Headline("온담 11:50에 30분 늦어요 · 2곳 더", late = true), t.headline())
     }
 
     @Test
@@ -66,6 +66,6 @@ class TripTimelineTest {
         val t = TripTimeline.build(now, arrival, listOf(reservation("r9", "내일 저녁", now.plusDays(1))), runner.errands.value)
         val stop = t.marks.single().stops.single()
         assertEquals(StopKind.PICKUP, stop.kind)
-        assertEquals("픽업 11:45", t.marks.single().label())
+        assertEquals(TripTimeline.Headline("다음 · 픽업 11:45", late = false), t.headline())
     }
 }

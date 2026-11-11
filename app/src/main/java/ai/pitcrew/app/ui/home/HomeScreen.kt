@@ -97,7 +97,6 @@ fun HomeScreen(state: HomeState, actions: HomeActions, width: WindowWidth) {
             onDismiss = actions.dismissVoice,
             modifier = Modifier.padding(bottom = if (state.voice == VoiceCommandState.Idle) 0.dp else PcSpacing.l),
         )
-        // 경로 전체를 맨 위에 넓게 두고, 그 아래 지금 답할 일과 다가오는 예약을 둔다
         val scroll = rememberScrollState()
         Column(Modifier.weight(1f).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
             trip(Modifier.fillMaxWidth())
@@ -131,24 +130,17 @@ private fun TripPanel(state: HomeState, modifier: Modifier) {
             return@PcCard
         }
         val arrival = LateArrivalPlanner.arrivalAt(state.now, destination.remainTimeSeconds)
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                "${destination.name}까지 ${minutesLabel(destination.remainTimeSeconds / 60L)}",
-                style = PcTheme.type.title,
-                color = colors.textPrimary,
-                maxLines = 1,
-                modifier = Modifier.weight(1f),
-            )
-            Text("도착 ${arrival.hhmm()} · ${distanceLabel(destination.remainDistanceMeters)}", style = PcTheme.type.body, color = colors.textSecondary)
-        }
-        Spacer(Modifier.height(PcSpacing.m))
-        TripTimelineBar(TripTimeline.build(state.now, arrival, state.reservations, state.errands))
+        TripTimelineBar(
+            TripTimeline.build(state.now, arrival, state.reservations, state.errands),
+            destinationName = destination.name,
+            meta = "${minutesLabel(destination.remainTimeSeconds / 60L)} · ${distanceLabel(destination.remainDistanceMeters)}",
+        )
     }
 }
 
 @Composable
 private fun WorkPanel(state: HomeState, actions: HomeActions, modifier: Modifier) {
-    // 답할 제안은 한 번에 하나만 보이고 나머지는 "다음"으로 알린다. 진행 중인 일은 그대로 보인다
+    // 답할 제안은 한 번에 하나만 보인다
     val awaiting = state.errands.filter { it.state == ErrandState.AWAITING_APPROVAL }
     val active = listOfNotNull(awaiting.firstOrNull()) + state.errands.filter { it.state == ErrandState.IN_PROGRESS }
     val recent = state.errands.filterNot { it.isActive }.take(2)
@@ -181,7 +173,7 @@ private fun WorkPanel(state: HomeState, actions: HomeActions, modifier: Modifier
                 val undoable = errand.canUndo(state.now) && state.driving.interactionMode == InteractionMode.TOUCH
                 ListRow(
                     errand.title(),
-                    // 시각은 기록 화면에 있으므로 여기서는 결과만 보여 줄바꿈이 어색하게 끊기지 않게 한다
+                    // 시각은 기록 화면에 있으므로 결과만 보여 줄바꿈이 어색하게 끊기지 않게 한다
                     supporting = errand.outcomeLine().orEmpty(),
                     leading = when (errand.state) {
                         ErrandState.COMPLETED -> Icons.Rounded.CheckCircle

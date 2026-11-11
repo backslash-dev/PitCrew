@@ -10,35 +10,18 @@ import java.time.LocalDateTime
 
 enum class StopKind { APPOINTMENT, PICKUP, CHARGE }
 
-/** 경로 위의 한 지점. [lateMinutes]는 약속에 도착이 늦는 분(늦지 않으면 0). */
+/** [lateMinutes]는 약속에 늦는 분(늦지 않으면 0). */
 data class Stop(val kind: StopKind, val time: LocalDateTime, val name: String, val lateMinutes: Long = 0) {
     val late: Boolean get() = lateMinutes > 0
 }
 
-/** 막대 위 한 자리. 가까운 지점은 하나로 묶인다. [fraction]은 0(지금)~1(도착) 위치. */
+/** [fraction]은 0(지금)~1(도착) 위치. */
 data class Mark(val fraction: Float, val stops: List<Stop>) {
     val cluster: Boolean get() = stops.size > 1
     val lateCount: Int get() = stops.count { it.late }
-
-    /** 막대 위에 붙는 짧은 이름표. 묶음은 범위와 늦는 곳 수로 요약한다. */
-    fun label(): String {
-        if (!cluster) {
-            val s = stops.single()
-            return when (s.kind) {
-                StopKind.APPOINTMENT -> "${s.name} ${s.time.hhmm()}" + if (s.late) " · ${s.lateMinutes}분 늦음" else ""
-                StopKind.PICKUP -> "픽업 ${s.time.hhmm()}"
-                StopKind.CHARGE -> "충전 ${s.time.hhmm()}"
-            }
-        }
-        val range = "${stops.first().time.hhmm()}~${stops.last().time.hhmm()}"
-        return if (lateCount > 0) "$range · ${lateCount}곳 늦음" else range
-    }
 }
 
-/**
- * 지금부터 도착까지의 경로. 도착이 [ZOOM_AFTER]보다 멀면 다음 [ZOOM_WINDOW]만 막대의 [ZOOM_SPAN]에 펼치고
- * 나머지는 점선 꼬리로 줄인다(긴 경로에서 가까운 일이 왼쪽 끝에 몰리지 않게). [laterCount]는 꼬리 쪽에 숨은 지점 수.
- */
+/** 긴 경로에서 가까운 일이 왼쪽 끝에 몰리지 않게 먼 구간은 점선 꼬리로 줄인다. */
 data class TripTimeline(
     val now: LocalDateTime,
     val arrival: LocalDateTime,
@@ -46,12 +29,31 @@ data class TripTimeline(
     val marks: List<Mark>,
     val laterCount: Int,
 ) {
+    val stops: List<Stop> get() = marks.flatMap { it.stops }
+
+    fun headline(): Headline? {
+        val late = stops.filter { it.late }
+        late.firstOrNull()?.let { first ->
+            val more = late.size - 1
+            return Headline("${first.name} ${first.time.hhmm()}에 ${first.lateMinutes}분 늦어요" + if (more > 0) " · ${more}곳 더" else "", late = true)
+        }
+        val next = stops.firstOrNull() ?: return null
+        val what = when (next.kind) {
+            StopKind.APPOINTMENT -> next.name
+            StopKind.PICKUP -> "픽업"
+            StopKind.CHARGE -> "충전"
+        }
+        return Headline("다음 · $what ${next.time.hhmm()}", late = false)
+    }
+
+    data class Headline(val text: String, val late: Boolean)
+
     companion object {
         val ZOOM_AFTER: Duration = Duration.ofMinutes(75)
         val ZOOM_WINDOW: Duration = Duration.ofMinutes(60)
         const val ZOOM_SPAN = 0.8f
-        /** 막대 너비의 이 비율보다 가까운 지점은 이름표가 겹치므로 묶는다. */
-        const val MIN_GAP = 0.12f
+        /** 막대 너비의 이 비율보다 가까운 지점은 점이 겹치므로 하나로 묶는다. */
+        const val MIN_GAP = 0.03f
         private val LOOK_BEHIND: Duration = Duration.ofMinutes(30)
         private val LOOK_AFTER_ARRIVAL: Duration = Duration.ofMinutes(60)
 
@@ -69,7 +71,7 @@ data class TripTimeline(
             return TripTimeline(now, arrival, zoomed, cluster(visible.map { fraction(it.time) to it }), later.size)
         }
 
-        // 도착 전후의 약속만 본다. 경로와 무관한 먼 약속(내일 저녁 등)은 막대를 복잡하게만 한다
+        // 경로와 무관한 먼 약속(내일 저녁 등)은 막대를 복잡하게만 한다
         private fun appointments(reservations: List<Reservation>, now: LocalDateTime, arrival: LocalDateTime) =
             reservations
                 .filter { it.time.isAfter(now.minus(LOOK_BEHIND)) && !it.time.isAfter(arrival.plus(LOOK_AFTER_ARRIVAL)) }
@@ -81,7 +83,8 @@ data class TripTimeline(
                 when (val d = e.detail) {
                     is ErrandDetail.Pickup -> Stop(StopKind.PICKUP, at(e, d.readyAt), d.store.name)
                     is ErrandDetail.ChargeAndDine -> Stop(StopKind.CHARGE, at(e, d.arriveAt), d.charger.name)
-                    is ErrandDetail.LateArrival -> null
+                    // 약속은 서버 예약으로 들어와 예약 지점으로 보이고, 지각·메일은 경로 위 지점이 아니다
+                    is ErrandDetail.LateArrival, is ErrandDetail.Meetup, is ErrandDetail.MailReply -> null
                 }
             }
             .filter { !it.time.isBefore(now) }

@@ -14,10 +14,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.EvStation
-import androidx.compose.material.icons.rounded.LocalCafe
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,97 +28,91 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
-private val DOT = 24.dp
-private val CLUSTER_DOT = 40.dp
-private val LINE = 5.dp
-private val LABEL_ROW = 44.dp
+private val DOT = 16.dp
+private val END_DOT = 20.dp
+private val TRACK = 40.dp
+private val LINE = 4.dp
 
-/**
- * 지금(왼쪽)부터 도착(오른쪽)까지 점과 선으로 그린다. 늦는 약속은 주황, 묶음은 개수를 적은 큰 점이고 누르면 아래에 펼친다.
- * [compact]는 주행 화면용으로, 늦는 지점과 묶음 이름표만 남긴다.
- */
+/** [compact]는 주행 화면용으로, 시각은 화면이 따로 크게 보이므로 선과 문장만 남긴다. */
 @Composable
-fun TripTimelineBar(timeline: TripTimeline, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun TripTimelineBar(
+    timeline: TripTimeline,
+    modifier: Modifier = Modifier,
+    destinationName: String? = null,
+    meta: String? = null,
+    compact: Boolean = false,
+) {
     val colors = PcTheme.colors
-    var expanded by rememberSaveable { mutableStateOf<Int?>(null) }
-    val labeled = timeline.marks.withIndex().filter { (_, m) -> !compact || m.cluster || m.lateCount > 0 }
+    var expanded by rememberSaveable { mutableStateOf(false) }
     Column(modifier.fillMaxWidth()) {
-        // 이름표는 위·아래로 번갈아 두어 이웃끼리 겹치지 않게 한다
-        LabelRow(labeled.filterIndexed { i, _ -> i % 2 == 0 }.map { it.value })
-        Box(Modifier.fillMaxWidth().height(CLUSTER_DOT), contentAlignment = Alignment.CenterStart) {
-            val solidEnd = if (timeline.zoomed) TripTimeline.ZOOM_SPAN else 1f
-            Box(Modifier.fillMaxWidth(solidEnd).height(LINE).background(colors.divider))
-            if (timeline.zoomed) DottedTail(TripTimeline.ZOOM_SPAN)
-            AtFraction(0f) { Dot(colors.textPrimary, colors.textPrimary) }
-            AtFraction(1f) { Dot(colors.background, colors.textPrimary) }
-            timeline.marks.forEachIndexed { index, mark ->
-                AtFraction(mark.fraction) {
-                    MarkDot(mark, onClick = { expanded = if (expanded == index) null else index }.takeIf { mark.cluster })
-                }
+        if (!compact) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                EndTime("지금", timeline.now.hhmm(), Alignment.Start, Modifier.weight(1f))
+                EndTime(destinationName?.let { "$it 도착" } ?: "도착", timeline.arrival.hhmm(), Alignment.End)
             }
         }
-        Row(Modifier.fillMaxWidth().height(LABEL_ROW), verticalAlignment = Alignment.CenterVertically) {
-            Text("지금 ${timeline.now.hhmm()}", style = PcTheme.type.body, color = colors.textSecondary, modifier = Modifier.weight(1f))
-            if (timeline.laterCount > 0) {
-                Text("이후 ${timeline.laterCount}개", style = PcTheme.type.body, color = colors.textTertiary, modifier = Modifier.padding(end = PcSpacing.l))
-            }
-            Text("도착 ${timeline.arrival.hhmm()}", style = PcTheme.type.body, color = colors.textSecondary)
-        }
-        Box(Modifier.fillMaxWidth()) {
-            LabelRow(labeled.filterIndexed { i, _ -> i % 2 == 1 }.map { it.value })
-        }
-        expanded?.let { timeline.marks.getOrNull(it) }?.takeIf { it.cluster }?.let { ClusterList(it) }
-    }
-}
-
-@Composable
-private fun LabelRow(marks: List<Mark>) {
-    Box(Modifier.fillMaxWidth().height(LABEL_ROW)) {
-        marks.forEach { mark ->
-            AtFraction(mark.fraction) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    kindIcon(mark)?.let { Icon(it, contentDescription = null, tint = PcTheme.colors.textSecondary, modifier = Modifier.size(28.dp)) }
-                    Text(
-                        mark.label(),
-                        style = if (mark.lateCount > 0) PcTheme.type.bodyStrong else PcTheme.type.body,
-                        color = if (mark.lateCount > 0) PcTheme.colors.attention else PcTheme.colors.textSecondary,
-                        maxLines = 1,
+        Track(timeline)
+        val headline = timeline.headline()
+        val expandable = timeline.stops.size > 1 || timeline.laterCount > 0
+        if (headline != null || meta != null) {
+            Row(
+                Modifier.fillMaxWidth().then(if (expandable && !compact) Modifier.pressable(onClick = { expanded = !expanded }) else Modifier),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    headline?.text.orEmpty(),
+                    style = if (headline?.late == true) PcTheme.type.bodyStrong else PcTheme.type.body,
+                    color = if (headline?.late == true) colors.negative else colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (expandable && !compact) {
+                    Icon(
+                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (expanded) "지점 목록 접기" else "지점 목록 펼치기",
+                        tint = colors.textSecondary,
+                        modifier = Modifier.size(32.dp),
                     )
                 }
+                meta?.let { Text(it, style = PcTheme.type.body, color = colors.textSecondary, maxLines = 1, modifier = Modifier.padding(start = PcSpacing.l)) }
+            }
+        }
+        if (expanded && !compact) StopList(timeline)
+    }
+}
+
+@Composable
+private fun EndTime(caption: String, time: String, align: Alignment.Horizontal, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = align) {
+        Text(caption, style = PcTheme.type.body, color = PcTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(time, style = PcTheme.type.headline, color = PcTheme.colors.textPrimary, maxLines = 1)
+    }
+}
+
+@Composable
+private fun Track(timeline: TripTimeline) {
+    val colors = PcTheme.colors
+    Box(Modifier.fillMaxWidth().height(TRACK), contentAlignment = Alignment.CenterStart) {
+        val solidEnd = if (timeline.zoomed) TripTimeline.ZOOM_SPAN else 1f
+        Box(Modifier.fillMaxWidth(solidEnd).height(LINE).background(colors.divider, CircleShape))
+        if (timeline.zoomed) DottedTail(TripTimeline.ZOOM_SPAN)
+        AtFraction(0f) { Box(Modifier.size(END_DOT).background(colors.textPrimary, CircleShape)) }
+        AtFraction(1f) {
+            Box(Modifier.size(END_DOT).background(colors.background, CircleShape).border(4.dp, colors.textPrimary, CircleShape))
+        }
+        timeline.marks.forEach { mark ->
+            AtFraction(mark.fraction) {
+                Box(Modifier.size(DOT).background(if (mark.lateCount > 0) colors.negative else colors.textSecondary, CircleShape))
             }
         }
     }
-}
-
-@Composable
-private fun MarkDot(mark: Mark, onClick: (() -> Unit)?) {
-    val colors = PcTheme.colors
-    val late = mark.lateCount > 0
-    val fill = if (late) colors.attentionContainer else colors.background
-    val ring = if (late) colors.attention else colors.textSecondary
-    if (!mark.cluster) {
-        Dot(fill, ring)
-        return
-    }
-    Box(
-        Modifier.size(CLUSTER_DOT).then(if (onClick != null) Modifier.pressable(onClick = onClick) else Modifier)
-            .background(fill, CircleShape).border(2.dp, ring, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text("${mark.stops.size}", style = PcTheme.type.bodyStrong, color = if (late) colors.attention else colors.textPrimary)
-    }
-}
-
-@Composable
-private fun Dot(fill: Color, ring: Color, size: Dp = DOT) {
-    Box(Modifier.size(size).background(fill, CircleShape).border(3.dp, ring, CircleShape))
 }
 
 @Composable
@@ -137,24 +132,26 @@ private fun DottedTail(from: Float) {
 }
 
 @Composable
-private fun ClusterList(mark: Mark) {
-    Column(Modifier.fillMaxWidth().padding(top = PcSpacing.xs), verticalArrangement = Arrangement.spacedBy(PcSpacing.xxs)) {
-        mark.stops.forEach { stop ->
-            Text(
-                "${stop.time.hhmm()}  ${stop.name}" + if (stop.late) "  · ${stop.lateMinutes}분 늦음" else "",
-                style = PcTheme.type.body,
-                color = if (stop.late) PcTheme.colors.attention else PcTheme.colors.textPrimary,
-            )
+private fun StopList(timeline: TripTimeline) {
+    val colors = PcTheme.colors
+    Column(Modifier.fillMaxWidth().padding(top = PcSpacing.s), verticalArrangement = Arrangement.spacedBy(PcSpacing.xs)) {
+        timeline.stops.forEach { stop ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(stop.time.hhmm(), style = PcTheme.type.body, color = if (stop.late) colors.negative else colors.textSecondary, modifier = Modifier.width(96.dp))
+                Text(stop.listName(), style = PcTheme.type.body, color = colors.textPrimary, modifier = Modifier.weight(1f))
+                if (stop.late) Text("${stop.lateMinutes}분 늦음", style = PcTheme.type.bodyStrong, color = colors.negative)
+            }
+        }
+        if (timeline.laterCount > 0) {
+            Text("도착 뒤 ${timeline.laterCount}곳 더", style = PcTheme.type.body, color = colors.textTertiary)
         }
     }
 }
 
-private fun kindIcon(mark: Mark) = mark.stops.singleOrNull()?.let {
-    when (it.kind) {
-        StopKind.PICKUP -> Icons.Rounded.LocalCafe
-        StopKind.CHARGE -> Icons.Rounded.EvStation
-        StopKind.APPOINTMENT -> null
-    }
+private fun Stop.listName(): String = when (kind) {
+    StopKind.APPOINTMENT -> name
+    StopKind.PICKUP -> "$name 픽업"
+    StopKind.CHARGE -> "$name 충전"
 }
 
 /** 자식의 가운데를 너비의 [fraction] 위치에 두되, 양 끝을 넘지 않게 안쪽으로 당긴다. */
