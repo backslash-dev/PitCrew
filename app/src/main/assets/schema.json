@@ -1,6 +1,6 @@
 {
   "packageName": "ai.pitcrew.app",
-  "appDescription": "An in-car errand agent that handles running late for reservations and ordering pickups along the route based on the navigation arrival time, and can undo an errand it just completed.",
+  "appDescription": "An in-car errand agent that uses the navigation arrival time, location and vehicle state to handle errands outside the car: running late for reservations, ordering pickups along the route, meeting a contact halfway, replying to emails by voice (sent only after the driver reviews it when stopped), charging with a restaurant waitlist, and undoing an errand it just completed.",
   "invokeWord": "피트크루",
   "version": "0.1.0",
   "actionCalls": [
@@ -21,7 +21,9 @@
               "description": "New reservation time the user explicitly approved after being asked, in 24-hour HH:mm format."
             }
           },
-          "required": ["appointmentTime"]
+          "required": [
+            "appointmentTime"
+          ]
         },
         "component": "service"
       }
@@ -47,7 +49,9 @@
               "description": "Whether the user explicitly approved the proposed store and pickup time after being asked."
             }
           },
-          "required": ["item"]
+          "required": [
+            "item"
+          ]
         },
         "component": "service"
       }
@@ -55,17 +59,23 @@
     {
       "type": "function",
       "function": {
-        "name": "CANCEL_LAST_ERRAND",
-        "description": "Undo the errand PitCrew completed in the last few minutes, such as restoring a changed reservation, cancelling a pickup order, or cancelling a restaurant waitlist, when the user says it was a mistake or wants to cancel it.",
+        "name": "HANDLE_PITCREW_REQUEST",
+        "description": "Handle any other PitCrew errand from the driver's own words: meet a contact halfway between both people's locations, reply to the latest email by voice (the reply is only drafted, and it is sent after the driver reviews it on screen when stopped), find a charging stop and join a nearby restaurant waitlist while charging, or undo the errand PitCrew completed in the last few minutes.",
         "parameters": {
           "type": "object",
           "properties": {
+            "request": {
+              "type": "string",
+              "description": "The driver's request sentence exactly as spoken, in the original language (Korean). Do not translate, summarize or rephrase it."
+            },
             "confirmed": {
               "type": "boolean",
-              "description": "Whether the user explicitly approved undoing the errand after being told what will be undone."
+              "description": "Whether the user explicitly approved what PitCrew proposed after being asked."
             }
           },
-          "required": []
+          "required": [
+            "request"
+          ]
         },
         "component": "service"
       }

@@ -6,7 +6,8 @@ import java.time.LocalTime
 
 class RuleBasedInterpreterTest {
     private val stores = listOf("세모 커피 역삼점", "노을 베이커리 서초점")
-    private fun parse(text: String) = RuleBasedInterpreter.parse(text, stores)
+    private val contacts = listOf("김민수", "이서연", "박준호")
+    private fun parse(text: String) = RuleBasedInterpreter.parse(text, stores, contacts)
 
     @Test
     fun `숫자 시각과 늦는다는 말이면 지각 대응이다`() {
@@ -59,5 +60,37 @@ class RuleBasedInterpreterTest {
     fun `한 시간 늦는다는 말의 한 시를 시각으로 읽지 않는다`() {
         assertEquals(VoiceCommand.LateArrival(LocalTime.of(7, 0)), parse("한 시간 늦을 것 같아, 7시 약속"))
         assertEquals(VoiceCommand.LateArrivalWithoutTime, parse("한 시간쯤 늦을 듯"))
+    }
+
+    @Test
+    fun `중간에서 보자고 하면 약속 조율이고 성을 빼고 불러도 일행을 찾는다`() {
+        assertEquals(VoiceCommand.Meetup("김민수", null), parse("민수랑 중간에서 보자"))
+        assertEquals(VoiceCommand.Meetup("이서연", LocalTime.of(19, 0)), parse("저녁 7시에 이서연이랑 중간쯤에서 만나"))
+        assertEquals(VoiceCommand.Meetup(null, null), parse("중간 지점에서 만나자"))
+    }
+
+    @Test
+    fun `중간이라는 말 없이도 일행과 만나자고 하면 약속 조율이지만, 늦는다는 말이 있으면 지각 대응이다`() {
+        assertEquals(VoiceCommand.Meetup("박준호", LocalTime.of(8, 0)), parse("준호랑 8시에 만나자"))
+        assertEquals(VoiceCommand.LateArrival(LocalTime.of(7, 0)), parse("민수랑 7시에 만나기로 했는데 늦을 것 같아"))
+    }
+
+    @Test
+    fun `가는 길 중간에 주문하는 말은 픽업이다`() {
+        assertEquals(VoiceCommand.Pickup("아메리카노", null), parse("가는 길 중간에 아메리카노 주문해줘"))
+    }
+
+    @Test
+    fun `메일·답장이라는 말이 있으면 다른 낱말보다 먼저 메일 답장이다`() {
+        assertEquals(VoiceCommand.MailReply("방금 메일 괜찮다고 답장해"), parse("방금 메일 괜찮다고 답장해"))
+        assertEquals(VoiceCommand.MailReply("늦는다고 답장해줘"), parse("늦는다고 답장해줘"))
+        assertEquals(VoiceCommand.MailReply("충전 중이라 이따 회신한다고 해"), parse("충전 중이라 이따 회신한다고 해"))
+    }
+
+    @Test
+    fun `Gleo가 영어로 옮겨 넘긴 요청도 알아듣는다`() {
+        assertEquals(VoiceCommand.MailReply("Reply to the email saying it's fine"), parse("Reply to the email saying it's fine"))
+        assertEquals(VoiceCommand.Undo, parse("Cancel what you just did"))
+        assertEquals(VoiceCommand.Meetup("김민수", null), parse("Meet 민수 halfway"))
     }
 }

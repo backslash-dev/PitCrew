@@ -7,23 +7,22 @@ import ai.pitcrew.app.data.WaypointEditor
 import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
+import ai.pitcrew.app.domain.MeetupMode
 import ai.pitcrew.app.domain.StepState
 import ai.pitcrew.app.ui.format.hhmm
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDateTime
 import java.time.LocalTime
 
-/**
- * 단계마다 서버를 부른다. 지각: 예약 변경 요청 → 변경 확인 → 일행 알림. 픽업: 주문 → 준비 확인 → 경유지 추가(내비).
- * 충전: 줄서기 등록 → 충전소 경유지 추가. 실패하면 서버의 안내 문장을 그대로 작업 실패 사유로 쓴다.
- * 되돌리기에 쓰도록 첫 단계에서 서버가 준 id(예약 변경·주문·줄서기)를 남긴다.
- */
+/** 되돌리기에 쓰도록 첫 단계에서 서버가 준 id(예약 변경·주문·줄서기)를 남긴다. */
 class RemoteStepExecutor(
     private val api: PitCrewApi,
     private val reloadReservations: suspend () -> Unit,
     private val waypoints: WaypointEditor,
+    private val reloadMails: suspend () -> Unit = {},
     private val now: () -> LocalDateTime = LocalDateTime::now,
 ) : StepExecutor {
     override suspend fun execute(errand: Errand, stepIndex: Int): StepResult = try {
@@ -31,6 +30,8 @@ class RemoteStepExecutor(
             is ErrandDetail.LateArrival -> lateArrival(d, stepIndex, key(errand, stepIndex))
             is ErrandDetail.Pickup -> pickup(d, stepIndex, key(errand, stepIndex))
             is ErrandDetail.ChargeAndDine -> chargeAndDine(d, stepIndex, key(errand, stepIndex))
+            is ErrandDetail.Meetup -> meetup(errand, d, stepIndex, key(errand, stepIndex))
+            is ErrandDetail.MailReply -> mailReply(d, key(errand, stepIndex))
         }
     } catch (e: CancellationException) {
         throw e
@@ -55,6 +56,12 @@ class RemoteStepExecutor(
                     api.post("v1/waitlists/$reference/cancel", JSONObject())
                     UndoResult.Undone(removeWaypoint(d.charger.name, d.charger.latitude, d.charger.longitude))
                 }
+                is ErrandDetail.Meetup -> {
+                    val cancelled = api.post("v1/meetups/$reference/cancel", JSONObject())
+                    reloadReservations()
+                    UndoResult.Undone(cancelled.optString("note").takeIf { it.isNotEmpty() })
+                }
+                is ErrandDetail.MailReply -> UndoResult.Failed("보낸 메일은 되돌릴 수 없어요")
             }
         } catch (e: CancellationException) {
             throw e
@@ -127,6 +134,45 @@ class RemoteStepExecutor(
         }
         2 -> addWaypoint(d.charger.name, d.charger.latitude, d.charger.longitude)
         else -> StepResult.Done
+    }
+
+    private suspend fun meetup(errand: Errand, d: ErrandDetail.Meetup, stepIndex: Int, key: String): StepResult {
+        val booking = if (d.mode == MeetupMode.SMS) 2 else 1
+        return when {
+            d.mode == MeetupMode.SMS && stepIndex == 1 -> {
+                val plan = api.post("v1/meetups/ask", meetupRequest(d.contact.id, d.latitude, d.longitude, d.preferredAt), key).toMeetupPlan()
+                StepResult.Planned(d.copy(place = plan.place, meetAt = plan.meetAt, userTravelMinutes = plan.userTravelMinutes, peerTravelMinutes = plan.peerTravelMinutes))
+            }
+            stepIndex == booking -> {
+                val place = d.place ?: return StepResult.Failed("만날 장소가 정해지지 않았어요")
+                val at = d.meetAt ?: return StepResult.Failed("만날 시각이 정해지지 않았어요")
+                val booked = api.post(
+                    "v1/meetups",
+                    JSONObject().put("contactId", d.contact.id).put("placeId", place.id).put("meetAt", at.toInstantString()).put("mode", d.mode.name),
+                    key,
+                )
+                reloadReservations()
+                StepResult.Recorded(booked.getString("id"))
+            }
+            else -> {
+                val id = errand.reference ?: return StepResult.Failed("예약 기록이 없어 전달하지 못했어요")
+                api.post("v1/meetups/$id/share", JSONObject(), key)
+                StepResult.Done
+            }
+        }
+    }
+
+    private suspend fun mailReply(d: ErrandDetail.MailReply, key: String): StepResult {
+        api.post("v1/mails/${d.mail.id}/reply", JSONObject().put("body", d.draft).put("instruction", d.instruction.take(200)), key)
+        // 이미 보냈으므로 목록 갱신 실패는 작업 실패로 보지 않는다
+        try {
+            reloadMails()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("RemoteStepExecutor", "mail reload failed", e)
+        }
+        return StepResult.Done
     }
 
     /** 실패한 받는 사람 수를 돌려준다. */

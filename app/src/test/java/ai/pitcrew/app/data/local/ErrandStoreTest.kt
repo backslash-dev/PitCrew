@@ -9,6 +9,9 @@ import ai.pitcrew.app.domain.Contact
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.Mail
+import ai.pitcrew.app.domain.MeetupMode
+import ai.pitcrew.app.domain.MeetupPlace
 import ai.pitcrew.app.domain.StepState
 import ai.pitcrew.app.testing.FakeWaypoints
 import kotlinx.coroutines.test.runTest
@@ -34,11 +37,18 @@ class ErrandStoreTest {
     private val charge = ErrandDetail.ChargeAndDine(charger, charger.restaurants.first(), 2, null, 30, LocalTime.of(18, 24))
 
     @Test
-    fun `세 종류 작업을 그대로 저장하고 읽는다`() = runTest {
+    fun `모든 종류 작업을 그대로 저장하고 읽는다`() = runTest {
         val runner = ErrandRunner(MockStepExecutor(FakeWaypoints()), now = { now })
         runner.approve(runner.propose(late, ErrandOrigin.SUGGESTED).id, ApprovalChannel.VOICE)
         runner.propose(pickup)
         runner.propose(charge)
+        runner.propose(
+            ErrandDetail.Meetup(
+                Contact("c1", "김민수", "010-2481-3307"), MeetupMode.SMS, MeetupPlace("mp", "양재 숲속 카페", 37.48, 127.03),
+                now.plusHours(1), 20, 25, null, 37.49, null,
+            ),
+        )
+        runner.propose(ErrandDetail.MailReply(Mail("m1", "정하윤", "h@example.com", "회의", "요약", now), "괜찮다고 해", "정하윤님,\n감사합니다."))
         val saved = runner.errands.value
         assertEquals(saved, ErrandJson.decode(ErrandJson.encode(saved)))
     }

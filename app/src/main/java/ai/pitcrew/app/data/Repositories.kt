@@ -6,6 +6,9 @@ import ai.pitcrew.app.domain.Contact
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandOrigin
+import ai.pitcrew.app.domain.Mail
+import ai.pitcrew.app.domain.MeetupMode
+import ai.pitcrew.app.domain.MeetupPlace
 import ai.pitcrew.app.domain.PastOrder
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.domain.Store
@@ -17,7 +20,7 @@ interface ContactRepository {
     /** 마지막 동기화 실패 안내. 성공하면 null. */
     val error: StateFlow<String?>
     fun refresh()
-    /** 한 번도 불러오지 못했으면 지금 불러온다. 판단 전에 빈 목록으로 오판하지 않게 한다. */
+    /** 판단 전에 빈 목록으로 오판하지 않게 한다. */
     suspend fun ensureLoaded()
     fun upsert(contact: Contact)
     fun delete(id: String)
@@ -28,50 +31,66 @@ interface ReservationRepository {
     val error: StateFlow<String?>
     fun refresh()
     suspend fun ensureLoaded()
-    /** 서버 상태로 지금 다시 맞춘다. 다른 기기·Gleo가 바꾼 예약 시각으로 판단해야 할 때 쓴다. 실패하면 이전 목록을 유지한다. */
+    /** 다른 기기·Gleo가 바꾼 예약 시각으로 판단할 때 쓴다. 실패하면 이전 목록을 유지한다. */
     suspend fun refreshNow()
     fun upsert(reservation: Reservation)
     fun delete(id: String)
 }
 
 interface StoreCatalog {
-    /** 경로상 매장을 찾는다. 이름이 없으면 우회 시간이 가장 짧은 곳. */
+    /** 이름이 없으면 우회 시간이 가장 짧은 곳. */
     suspend fun findOnRoute(storeName: String?): Store?
 
-    /** 우회 시간이 짧은 순서의 경로상 매장 후보. */
     suspend fun candidatesOnRoute(): List<Store>
 }
 
 interface ChargerCatalog {
-    /** 우회 시간이 짧은 순서의 경로상 충전소. 걸어갈 수 있는 식당을 함께 준다. */
     suspend fun onRoute(): List<Charger>
 }
 
 interface OrderHistory {
-    /** 최근 픽업 주문. 취소한 주문도 함께 준다. */
+    /** 취소한 주문도 함께 준다. */
     suspend fun recent(): List<PastOrder>
 }
 
-/** 승인이 필요한 차 밖 작업(예약 변경·픽업 주문)을 만들고 실행한다. 서버가 붙으면 구현만 교체한다. */
+/** 문자로 묻기 전에는 장소·시각이 없다. */
+data class MeetupPlan(
+    val mode: MeetupMode,
+    val place: MeetupPlace?,
+    val meetAt: LocalDateTime?,
+    val userTravelMinutes: Int?,
+    val peerTravelMinutes: Int?,
+)
+
+class MeetupUnavailableException(message: String) : Exception(message)
+
+interface MeetupService {
+    /** 에이전트가 없으면 [MeetupMode.SMS]만 돌려준다. 아무것도 보내지 않는다. */
+    suspend fun plan(contact: Contact, latitude: Double?, longitude: Double?, preferredAt: LocalDateTime?): MeetupPlan
+}
+
+interface MailService {
+    val mails: StateFlow<List<Mail>>
+    suspend fun refreshNow()
+    suspend fun draft(mail: Mail, instruction: String): String
+}
+
 interface ErrandService {
     val errands: StateFlow<List<Errand>>
 
     fun propose(detail: ErrandDetail, origin: ErrandOrigin = ErrandOrigin.REQUESTED): Errand
 
-    /** 실행이 끝날 때까지 기다리고 최종 상태를 돌려준다. */
     suspend fun approve(id: String, channel: ApprovalChannel): Errand
 
     fun decline(id: String)
 
     fun markArrivalAnnounced(id: String)
 
-    /** 답 없이 오래된 승인 대기 제안을 만료시킨다. */
     fun expireStale()
 
-    /** 방금 끝낸 작업을 되돌린다. 되돌릴 수 없는 상태면 그대로 돌려준다. */
+    /** 되돌릴 수 없는 상태면 그대로 돌려준다. */
     suspend fun undo(id: String, channel: ApprovalChannel): Errand
 }
 
-/** 되돌릴 수 있는 가장 최근 작업. */
 fun ErrandService.latestUndoable(now: LocalDateTime): Errand? =
     errands.value.filter { it.canUndo(now) }.maxByOrNull { it.finishedAt!! }

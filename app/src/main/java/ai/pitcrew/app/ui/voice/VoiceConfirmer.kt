@@ -35,10 +35,7 @@ object AnswerClassifier {
     }
 }
 
-/**
- * PitCrew가 먼저 묻는 질문을 TTS로 말하고 STT로 "응/아니"를 듣는다. Gleo를 거치지 않으므로 주행 중에도 손을 쓰지 않는다.
- * 다른 음성 입력("말하기")이 듣는 중이면 묻지 않는다.
- */
+/** Gleo를 거치지 않으므로 주행 중에도 손을 쓰지 않고 답한다. */
 class VoiceConfirmer(
     private val speaker: Speaker,
     private val speech: SpeechSource,
@@ -53,13 +50,16 @@ class VoiceConfirmer(
     private val _listening = MutableStateFlow(false)
     val listening: StateFlow<Boolean> = _listening.asStateFlow()
 
-    /** 마이크 대신 답을 넣는다. 시연 녹화와 디버그 빌드의 방송 입력이 쓴다. */
+    /** 시연 녹화와 디버그 빌드의 방송 입력이 쓴다. */
     fun answer(text: String) {
         injected.tryEmit(text)
     }
 
-    /** 물을 수 없으면(다른 질문·음성 입력 중, TTS 미연결) null. */
-    suspend fun ask(question: String): Answer? {
+    /** 다른 질문·음성 입력 중이거나 TTS 미연결이면 null. */
+    suspend fun ask(question: String): Answer? = hear(question)?.let(AnswerClassifier::classify)
+
+    /** 응/아니가 아닌 답(메일 답장 등)용. 못 들었으면 "", 물을 수 없으면 null. */
+    suspend fun hear(question: String): String? {
         if (speech.listening.value || !mutex.tryLock()) return null
         try {
             @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -80,7 +80,20 @@ class VoiceConfirmer(
                 _listening.value = false
                 if (micStarted) speech.stop()
             }
-            return heard?.let(AnswerClassifier::classify) ?: Answer.NONE
+            return heard.orEmpty()
+        } finally {
+            mutex.unlock()
+        }
+    }
+
+    /** 듣지 않고 말만 한다. 다른 질문 중이면 말하지 않고 false. */
+    suspend fun tell(text: String): Boolean {
+        if (!mutex.tryLock()) return false
+        try {
+            if (!speaker.speak(text)) return false
+            withTimeoutOrNull(speakStartMillis) { speaker.speaking.first { it } }
+            withTimeoutOrNull(speakMaxMillis) { speaker.speaking.first { !it } }
+            return true
         } finally {
             mutex.unlock()
         }

@@ -6,7 +6,9 @@ import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.ErrandStep
+import ai.pitcrew.app.domain.MeetupMode
 import ai.pitcrew.app.domain.StepState
+import ai.pitcrew.app.domain.needsTouchApproval
 import kotlinx.coroutines.CancellationException
 import ai.pitcrew.app.data.local.ErrandStore
 import kotlinx.coroutines.CoroutineScope
@@ -29,32 +31,26 @@ import java.util.UUID
 
 sealed interface StepResult {
     data object Done : StepResult
-    /** 성공했고, 되돌릴 때 쓸 서버 쪽 식별자를 남긴다. */
     data class Recorded(val reference: String) : StepResult
-    /** [reference]는 서버에서 이미 처리된 뒤 실패한 경우(예: 주문은 됐는데 경유지 실패) 되돌릴 수 있게 남긴다. */
+    /** 실행 중 정해진 내용(예: 문자 답장으로 정한 약속 장소)으로 작업을 바꾼다. */
+    data class Planned(val detail: ErrandDetail) : StepResult
+    /** [reference]는 서버 처리 뒤 실패한 경우(예: 주문 후 경유지 실패) 되돌리기용이다. */
     data class Failed(val reason: String?, val reference: String? = null) : StepResult
 }
 
 sealed interface UndoResult {
-    /** [note]는 되돌렸지만 일부를 못 했을 때 사용자에게 알릴 문장. */
     data class Undone(val note: String? = null) : UndoResult
     data class Failed(val reason: String) : UndoResult
 }
 
-/** 승인 이후 단계 하나를 실제로 수행한다. [stepIndex]는 승인 단계를 0으로 센 순서다. */
+/** [stepIndex]는 승인 단계를 0으로 센다. */
 fun interface StepExecutor {
     suspend fun execute(errand: Errand, stepIndex: Int): StepResult
 
     suspend fun undo(errand: Errand): UndoResult = UndoResult.Failed("되돌릴 수 없는 작업이에요")
 }
 
-/**
- * 작업의 상태 흐름(제안 → 승인 → 단계 진행 → 완료·실패 → 되돌리기)을 관리한다. 각 단계의 실제 처리는 [executor]가 맡는다.
- * 단계 사이 지연은 화면에서 진행이 보이게 하는 값이다.
- *
- * [workScope]가 있으면 승인 뒤 실행과 되돌리기를 그 범위에서 돌린다. 기다리던 쪽(Gleo 5초 예산)이 시간 초과로 취소돼도
- * 서버에 이미 보낸 요청과 화면 상태가 어긋나지 않도록 끝까지 진행한다.
- */
+/** [workScope]에서 실행해 기다리던 쪽(Gleo 5초 예산)이 취소돼도 서버 요청과 화면 상태를 맞춘다. */
 class ErrandRunner(
     private val executor: StepExecutor,
     private val now: () -> LocalDateTime = LocalDateTime::now,
@@ -67,13 +63,13 @@ class ErrandRunner(
     private val mutex = Mutex()
 
     init {
-        // 저장은 한 곳에서 순서대로 한다. StateFlow라 바뀌는 중간 상태는 건너뛰고 마지막 상태만 쓴다
+        // 저장은 한 곳에서 순서대로 한다. StateFlow라 중간 상태는 건너뛴다
         if (store != null && workScope != null) {
             workScope.launch(Dispatchers.IO) { _errands.drop(1).collect { store.save(it.take(MAX_KEPT)) } }
         }
     }
 
-    /** 앱이 실행 도중 종료됐다면 그때 진행 중이던 작업의 결과는 알 수 없다. 서버 기록이 있으면 되돌릴 수 있게 남긴다. */
+    /** 실행 도중 종료된 작업은 결과를 모르므로, 서버 기록이 있으면 되돌릴 수 있게 남긴다. */
     private fun recover(saved: List<Errand>): List<Errand> {
         val at = now()
         return saved.filter { Duration.between(it.createdAt, at) <= KEEP_FOR }.take(MAX_KEPT).map { e ->
@@ -108,6 +104,8 @@ class ErrandRunner(
         mutex.withLock {
             val current = find(id) ?: throw NoSuchElementException("errand $id")
             if (current.state != ErrandState.AWAITING_APPROVAL) return current
+            // 메일처럼 화면에서 내용을 봐야 하는 일은 음성 승인(Gleo·먼저 묻기)을 받지 않는다
+            if (channel == ApprovalChannel.VOICE && current.detail.needsTouchApproval) return current
             // 오래된 제안을 승인하면 지난 픽업 시각이 다음 날로 넘어가는 등 엉뚱하게 실행되므로 만료시킨다
             if (current.isStale(now())) {
                 expire(id)
@@ -149,9 +147,13 @@ class ErrandRunner(
                 return find(id)!!
             }
             update(id) { e ->
+                val detail = (result as? StepResult.Planned)?.detail ?: e.detail
+                val titles = if (detail === e.detail) null else plannedSteps(detail)
                 e.copy(
+                    detail = detail,
                     reference = (result as? StepResult.Recorded)?.reference ?: e.reference,
-                    steps = e.steps.mapIndexed { i, s ->
+                    steps = e.steps.mapIndexed { i, step ->
+                        val s = if (titles != null && i > stepIndex) step.copy(title = titles.getOrElse(i - 1) { step.title }) else step
                         when (i) {
                             stepIndex -> s.copy(state = StepState.DONE, at = now())
                             stepIndex + 1 -> s.copy(state = StepState.CURRENT)
@@ -237,6 +239,8 @@ class ErrandRunner(
             (mine.reservationId ?: mine.appointment.toString()) == (other.reservationId ?: other.appointment.toString())
         is ErrandDetail.Pickup -> other is ErrandDetail.Pickup
         is ErrandDetail.ChargeAndDine -> other is ErrandDetail.ChargeAndDine
+        is ErrandDetail.Meetup -> other is ErrandDetail.Meetup && other.contact.id == mine.contact.id
+        is ErrandDetail.MailReply -> other is ErrandDetail.MailReply && other.mail.id == mine.mail.id
     }
 
     companion object {
@@ -261,6 +265,15 @@ class ErrandRunner(
                 "${detail.restaurant.name} 줄서기",
                 "${detail.charger.name} 경유지 추가",
             )
+            is ErrandDetail.Meetup -> {
+                val name = detail.contact.name
+                val booking = if (detail.place != null && detail.meetAt != null) "${detail.place.name} ${detail.meetAt.format(HHMM)} 예약" else "중간 장소 예약"
+                when (detail.mode) {
+                    MeetupMode.AGENT -> listOf(booking, "${name}님 에이전트에 확정 전달")
+                    MeetupMode.SMS -> listOf("${name}님께 문자로 묻고 장소 정하기", booking, "${name}님께 장소·시간 문자")
+                }
+            }
+            is ErrandDetail.MailReply -> listOf("${detail.mail.senderName}님께 답장 보내기")
         }
     }
 }

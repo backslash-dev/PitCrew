@@ -8,6 +8,12 @@ import ai.pitcrew.app.errand.ChargeOutcome
 import ai.pitcrew.app.errand.CommandInterpreter
 import ai.pitcrew.app.errand.LateArrivalOutcome
 import ai.pitcrew.app.errand.LateArrivalUseCase
+import ai.pitcrew.app.errand.MailReplyOutcome
+import ai.pitcrew.app.errand.MailReplyUseCase
+import ai.pitcrew.app.errand.MeetupOutcome
+import ai.pitcrew.app.errand.MeetupUseCase
+import ai.pitcrew.app.domain.MeetupMode
+import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.errand.PickupOutcome
 import ai.pitcrew.app.errand.PickupUseCase
 import ai.pitcrew.app.errand.UndoOutcome
@@ -35,7 +41,6 @@ sealed interface VoiceCommandState {
     data class Done(val heard: String?, val message: String, val needsApproval: Boolean) : VoiceCommandState
 }
 
-/** 주차 중 앱 화면의 "말하기". 들은 문장을 해석해 지각 대응·픽업·충전·되돌리기 유스케이스를 실행한다. */
 class VoiceCommandController(
     private val speech: SpeechSource,
     private val interpreter: CommandInterpreter,
@@ -43,6 +48,8 @@ class VoiceCommandController(
     private val pickup: PickupUseCase,
     private val charging: ChargeAndDineUseCase,
     private val undo: UndoUseCase,
+    private val meetup: MeetupUseCase,
+    private val mail: MailReplyUseCase,
     private val scope: CoroutineScope,
     private val listenTimeoutMillis: Long = LISTEN_TIMEOUT_MILLIS,
 ) {
@@ -132,7 +139,31 @@ class VoiceCommandController(
                 is UndoOutcome.AwaitingConfirmation -> done("방금 한 일(${outcome.errand.title()})을 되돌리려면 최근 목록에서 되돌리기를 눌러 주세요.")
                 is UndoOutcome.Finished -> done("되돌렸어요.")
             }
-            VoiceCommand.Unknown -> done("어떤 일을 할지 알아듣지 못했어요. 지각 대응, 픽업 주문, 충전, 되돌리기를 말해 주세요.")
+            is VoiceCommand.Meetup -> when (val outcome = meetup.propose(command.contactName, command.time)) {
+                is MeetupOutcome.UnknownContact -> done(
+                    if (outcome.spoken == null) "누구와 만날지 일행 이름을 함께 말해 주세요." else "${outcome.spoken}님을 일행에서 찾지 못했어요. 예약 탭의 일행에 먼저 등록해 주세요.",
+                )
+                is MeetupOutcome.Unavailable -> done(outcome.reason)
+                is MeetupOutcome.AwaitingApproval -> {
+                    val d = outcome.errand.detail as ErrandDetail.Meetup
+                    done(
+                        when (d.mode) {
+                            MeetupMode.AGENT -> "${d.contact.name}님 에이전트와 맞춰 ${d.meetAt?.hhmm()} ${d.place?.name}에서 만나요. 아래 카드에서 확인하고 승인해 주세요."
+                            MeetupMode.SMS -> "${d.contact.name}님은 에이전트가 없어 문자로 위치를 물어본 뒤 장소를 정해요. 아래 카드에서 승인해 주세요."
+                        },
+                        needsApproval = true,
+                    )
+                }
+                is MeetupOutcome.Finished -> done("처리했어요.")
+            }
+            is VoiceCommand.MailReply -> when (val outcome = mail.draft(command.instruction)) {
+                MailReplyOutcome.NoMail -> done("답장할 메일이 없어요.")
+                is MailReplyOutcome.AwaitingReview -> {
+                    val d = outcome.errand.detail as ErrandDetail.MailReply
+                    done("${d.mail.senderName}님께 보낼 답장을 썼어요. 아래 카드에서 내용을 확인하고 보내 주세요.", needsApproval = true)
+                }
+            }
+            VoiceCommand.Unknown -> done("어떤 일을 할지 알아듣지 못했어요. 지각 대응, 픽업 주문, 충전, 약속 잡기, 메일 답장, 되돌리기를 말해 주세요.")
         }
     }
 

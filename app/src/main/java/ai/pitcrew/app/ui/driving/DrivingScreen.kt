@@ -3,6 +3,7 @@ package ai.pitcrew.app.ui.driving
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.needsTouchApproval
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.errand.LateArrivalPlanner
 import ai.pitcrew.app.platform.Destination
@@ -37,10 +38,7 @@ import androidx.compose.ui.unit.dp
 import java.time.Duration
 import java.time.LocalDateTime
 
-/**
- * 주행 중 화면. 1~2초 안에 읽을 핵심만 두고 조작 요소는 두지 않는다.
- * 움직이는 요소도 없다(주의분산 가이드).
- */
+/** 1~2초 안에 읽을 핵심만 두고 조작·움직이는 요소는 두지 않는다(주의분산 가이드). */
 @Composable
 fun DrivingScreen(destination: Destination?, errands: List<Errand>, reservations: List<Reservation>, now: LocalDateTime, listening: Boolean) {
     val colors = PcTheme.colors
@@ -92,14 +90,16 @@ fun DrivingScreen(destination: Destination?, errands: List<Errand>, reservations
 
 internal fun drivingHint(focus: Errand?, now: LocalDateTime, listening: Boolean): String = when {
     focus == null -> "Gleo를 부르고 \"피트크루 앱으로…\"라고 말하세요"
+    focus.state == ErrandState.AWAITING_APPROVAL && focus.detail.needsTouchApproval -> focus.voiceApprovalHint(listening)
     focus.state == ErrandState.AWAITING_APPROVAL && focus.origin == ErrandOrigin.SUGGESTED -> focus.voiceApprovalHint(listening)
     focus.state == ErrandState.AWAITING_APPROVAL -> "Gleo에게 \"응\" 또는 \"아니\"라고 답하세요"
     focus.canUndo(now) -> "되돌리려면 Gleo에게 \"피트크루 앱으로 방금 거 취소해\""
     else -> "Gleo를 부르고 \"피트크루 앱으로…\"라고 말하세요"
 }
 
-/** 승인 대기 > 진행 중 > 10분 안에 끝난 작업 순으로 하나만 보여준다. */
+/** 정차 후 보낼 메일 초안은 오래 남으므로 맨 뒤로 미룬다. */
 internal fun drivingFocus(errands: List<Errand>, now: LocalDateTime): Errand? =
-    errands.firstOrNull { it.state == ErrandState.AWAITING_APPROVAL }
+    errands.firstOrNull { it.state == ErrandState.AWAITING_APPROVAL && !it.detail.needsTouchApproval }
         ?: errands.firstOrNull { it.state == ErrandState.IN_PROGRESS }
         ?: errands.firstOrNull { e -> e.finishedAt?.let { Duration.between(it, now).toMinutes() < 10 } == true }
+        ?: errands.firstOrNull { it.state == ErrandState.AWAITING_APPROVAL }

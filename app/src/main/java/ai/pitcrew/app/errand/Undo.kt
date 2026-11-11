@@ -18,7 +18,7 @@ sealed interface UndoOutcome {
     data class Finished(val errand: Errand) : UndoOutcome
 }
 
-/** 방금 끝낸 작업 되돌리기. 운전 중 오인식으로 잘못 승인한 경우의 안전장치다. */
+/** 운전 중 오인식으로 잘못 승인한 경우의 안전장치다. */
 class UndoUseCase(private val errands: ErrandService, private val now: () -> LocalDateTime = LocalDateTime::now) {
     fun target(): Errand? = errands.latestUndoable(now())
 
@@ -29,12 +29,11 @@ class UndoUseCase(private val errands: ErrandService, private val now: () -> Loc
     }
 }
 
-/**
- * Gleo가 첫 요청부터 confirmed=true를 붙여 보내는 경우가 있다. 엉뚱한 작업을 되돌리지 않도록,
- * 무엇을 되돌릴지 한 번 알린(asking) 그 작업에 대해서만 확인을 받아들인다.
- */
-class CancelLastErrandHandler(private val useCase: UndoUseCase) : GleoActionHandler {
-    private val function = GleoFunction.CANCEL_LAST_ERRAND
+/** Gleo가 첫 요청부터 confirmed=true를 붙이기도 해, 먼저 알린 작업에만 확인을 받는다. */
+class CancelLastErrandHandler(
+    private val useCase: UndoUseCase,
+    private val function: GleoFunction = GleoFunction.HANDLE_PITCREW_REQUEST,
+) : GleoActionHandler {
     @Volatile private var announcedId: String? = null
 
     override suspend fun handle(request: GleoRequest): GleoResponse {
@@ -74,6 +73,8 @@ class CancelLastErrandHandler(private val useCase: UndoUseCase) : GleoActionHand
         }
         is ErrandDetail.Pickup -> "cancel the ${d.item} pickup order at ${d.store.displayName} and remove the waypoint"
         is ErrandDetail.ChargeAndDine -> "cancel the waitlist at ${d.restaurant.name} and remove the charging stop at ${d.charger.name}"
+        is ErrandDetail.Meetup -> "cancel the meeting with ${d.contact.name}${d.place?.let { " at ${it.name}" }.orEmpty()} and let them know"
+        is ErrandDetail.MailReply -> "unsend the reply to ${d.mail.senderName}"
     }
 
     private fun Errand.undoneDescription(): String = when (val d = detail) {
@@ -83,6 +84,8 @@ class CancelLastErrandHandler(private val useCase: UndoUseCase) : GleoActionHand
         }
         is ErrandDetail.Pickup -> "cancelled the ${d.item} pickup order at ${d.store.displayName} and removed the waypoint"
         is ErrandDetail.ChargeAndDine -> "cancelled the waitlist at ${d.restaurant.name} and removed the charging stop at ${d.charger.name}"
+        is ErrandDetail.Meetup -> "cancelled the meeting with ${d.contact.name}${d.place?.let { " at ${it.name}" }.orEmpty()}"
+        is ErrandDetail.MailReply -> "unsent the reply to ${d.mail.senderName}"
     }
 
     private fun Errand.toData(): Map<String, Any> = when (val d = detail) {
@@ -93,5 +96,12 @@ class CancelLastErrandHandler(private val useCase: UndoUseCase) : GleoActionHand
         }
         is ErrandDetail.Pickup -> mapOf("type" to "pickupOrder", "item" to d.item, "store" to d.store.displayName)
         is ErrandDetail.ChargeAndDine -> mapOf("type" to "chargeAndDine", "restaurant" to d.restaurant.name, "charger" to d.charger.name)
+        is ErrandDetail.Meetup -> buildMap {
+            put("type", "meetup")
+            put("contact", d.contact.name)
+            d.place?.let { put("place", it.name) }
+            d.meetAt?.let { put("meetTime", it.toLocalTime().toClockTime()) }
+        }
+        is ErrandDetail.MailReply -> mapOf("type" to "mailReply", "to" to d.mail.senderName)
     }
 }

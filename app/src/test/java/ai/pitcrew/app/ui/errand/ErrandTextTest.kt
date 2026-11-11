@@ -1,5 +1,6 @@
 package ai.pitcrew.app.ui.errand
 
+import ai.pitcrew.app.ui.format.withObjectParticle
 import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.testing.FakeWaypoints
@@ -82,5 +83,12 @@ class ErrandTextTest {
         val followUp = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }).propose(late.copy(followUp = true, companions = emptyList()))
         assertEquals("온담 한식당에 14분 더 늦어요", followUp.title())
         assertEquals("예약을 00:00에 다시 잡아요", followUp.summary())
+    }
+
+    @Test
+    fun `장소 이름 받침에 맞춰 을·를을 붙인다`() {
+        assertEquals("정원 카페 수서를", "정원 카페 수서".withObjectParticle())
+        assertEquals("온담 한식당을", "온담 한식당".withObjectParticle())
+        assertEquals("Cafe K를", "Cafe K".withObjectParticle())
     }
 }

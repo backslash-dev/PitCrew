@@ -11,7 +11,8 @@ import org.json.JSONTokener
 enum class GleoFunction {
     NOTIFY_LATE_ARRIVAL,
     ORDER_PICKUP_ON_ROUTE,
-    CANCEL_LAST_ERRAND;
+    /** 규격상 함수는 3개까지라, 나머지 일(되돌리기·약속 조율·메일 답장·충전)은 말한 문장을 받아 앱이 나눈다. */
+    HANDLE_PITCREW_REQUEST;
 
     companion object {
         // 문서 예시는 action이 함수명이지만, 에뮬레이터 Gleo(ai.umos.ambientai)는 "<패키지명>.<함수명>"으로 보낸다

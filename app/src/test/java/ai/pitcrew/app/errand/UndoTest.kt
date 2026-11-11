@@ -176,7 +176,7 @@ class CancelLastErrandHandlerTest {
     private val pickup = ErrandDetail.Pickup("아메리카노", MockStoreCatalog.DEFAULT_STORES.first(), LocalTime.of(18, 20))
 
     private fun request(confirmed: Boolean?) = GleoRequest(
-        GleoFunction.CANCEL_LAST_ERRAND,
+        GleoFunction.HANDLE_PITCREW_REQUEST,
         JSONObject().apply { if (confirmed != null) put("confirmed", confirmed) },
     )
 

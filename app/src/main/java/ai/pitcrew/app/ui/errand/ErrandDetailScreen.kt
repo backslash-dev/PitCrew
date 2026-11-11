@@ -3,6 +3,7 @@ package ai.pitcrew.app.ui.errand
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.MeetupMode
 import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.domain.Store
 import ai.pitcrew.app.platform.InteractionMode
@@ -40,6 +41,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.EvStation
+import androidx.compose.material.icons.rounded.Place
+import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.SearchOff
@@ -76,14 +80,12 @@ fun ErrandDetailScreen(
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = PcSpacing.xl)) {
             Text(errand.title(), style = PcTheme.type.headline, color = PcTheme.colors.textPrimary)
             Spacer(Modifier.height(PcSpacing.xs))
-            // 끝난 일은 앞으로 할 일(요약) 대신 결과 문장을 보인다
             Text(
                 errand.outcomeLine() ?: errand.summary(),
                 style = PcTheme.type.bodyLarge,
                 color = if (errand.state == ErrandState.FAILED) PcTheme.colors.negative else PcTheme.colors.textSecondary,
             )
             Spacer(Modifier.height(PcSpacing.xl))
-            // 이 일이 경로 어디쯤인지 보이게 한다
             if (timeline != null && errand.isActive) {
                 PcCard(Modifier.fillMaxWidth()) { TripTimelineBar(timeline) }
                 Spacer(Modifier.height(PcSpacing.l))
@@ -108,6 +110,8 @@ fun ErrandDetailScreen(
                 timeline()
                 Companions(errand)
                 DiningPlan(errand)
+                MeetupPlan(errand)
+                MailDraft(errand)
                 OtherStores(errand, mode, storeOptions, onSwitchStore)
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
@@ -115,6 +119,8 @@ fun ErrandDetailScreen(
                         figures()
                         Companions(errand)
                         DiningPlan(errand)
+                        MeetupPlan(errand)
+                        MailDraft(errand)
                         OtherStores(errand, mode, storeOptions, onSwitchStore)
                     }
                     Column(Modifier.weight(1f)) { timeline() }
@@ -129,6 +135,7 @@ fun ErrandDetailScreen(
                 onDecline = { onDecline(errand.id) },
                 modifier = Modifier.padding(vertical = PcSpacing.l),
                 voiceHint = errand.voiceApprovalHint(listening),
+                labels = errand.approvalLabels(),
             )
         } else if (errand.canUndo(now) || errand.undoing) {
             Hairline()
@@ -165,7 +172,7 @@ private fun Figures(errand: Errand) {
                 is ErrandDetail.LateArrival -> {
                     KeyFigure("약속", d.appointment.hhmm(), Modifier.widthIn(min = 160.dp))
                     KeyFigure("도착 예정", d.estimatedArrival.hhmm(), Modifier.widthIn(min = 160.dp))
-                    KeyFigure("늦는 시간", minutesLabel(d.delayMinutes), Modifier.widthIn(min = 160.dp), tone = Tone.ATTENTION)
+                    KeyFigure("늦는 시간", minutesLabel(d.delayMinutes), Modifier.widthIn(min = 160.dp), tone = Tone.NEGATIVE)
                     KeyFigure("변경할 시간", d.proposedTime.hhmm(), Modifier.widthIn(min = 160.dp))
                 }
                 is ErrandDetail.Pickup -> {
@@ -179,12 +186,21 @@ private fun Figures(errand: Errand) {
                     KeyFigure("충전", "약 ${d.chargeMinutes}분", Modifier.widthIn(min = 160.dp))
                     KeyFigure("식당 대기", "${d.restaurant.waitMinutes}분", Modifier.widthIn(min = 160.dp))
                 }
+                is ErrandDetail.Meetup -> {
+                    val pending = "답장 후"
+                    KeyFigure("만나는 시각", d.meetAt?.hhmm() ?: pending, Modifier.widthIn(min = 160.dp))
+                    KeyFigure("나", d.userTravelMinutes?.let { "${it}분" } ?: pending, Modifier.widthIn(min = 160.dp))
+                    KeyFigure(d.contact.name, d.peerTravelMinutes?.let { "${it}분" } ?: pending, Modifier.widthIn(min = 160.dp))
+                }
+                is ErrandDetail.MailReply -> {
+                    KeyFigure("보낸 사람", d.mail.senderName, Modifier.widthIn(min = 160.dp))
+                    KeyFigure("받은 시각", d.mail.receivedAt.hhmm(), Modifier.widthIn(min = 160.dp))
+                }
             }
         }
     }
 }
 
-/** 상세 화면에서 다른 매장으로 바꿀 때 보여줄 후보. 픽업 시각은 화면에서 미리 계산해 넘긴다. */
 data class StoreOption(val store: Store, val readyAt: LocalTime)
 
 @Composable
@@ -216,6 +232,42 @@ private fun DiningPlan(errand: Errand) {
         ListRow(d.charger.name, supporting = "${d.charger.powerKw}kW · 빈자리 ${d.charger.availableStalls}면 · 우회 ${d.charger.detourMinutes}분", leading = Icons.Rounded.EvStation)
         ListRow(d.restaurant.name, supporting = "걸어서 ${d.restaurant.walkMinutes}분 · 대기 ${d.restaurant.waitMinutes}분 · ${d.partySize}명", leading = Icons.Rounded.Restaurant)
     }
+}
+
+@Composable
+private fun MeetupPlan(errand: Errand) {
+    val d = errand.detail as? ErrandDetail.Meetup ?: return
+    Spacer(Modifier.height(PcSpacing.l))
+    SectionHeader("어떻게 정하나")
+    Column(verticalArrangement = Arrangement.spacedBy(PcSpacing.xs)) {
+        when (d.mode) {
+            MeetupMode.AGENT -> ListRow(d.contact.name, supporting = "${d.contact.name}님 에이전트와 위치·빈 시간을 주고받았어요", leading = Icons.Rounded.SmartToy)
+            MeetupMode.SMS -> ListRow(d.contact.name, supporting = "에이전트가 없어 문자로 위치·시간을 물어요 · ${d.contact.phone}", leading = Icons.Rounded.Sms)
+        }
+        ListRow(
+            d.place?.name ?: "답장을 받으면 정해요",
+            supporting = "두 사람 중 더 오래 걸리는 쪽이 가장 짧은 곳",
+            leading = Icons.Rounded.Place,
+        )
+    }
+}
+
+@Composable
+private fun MailDraft(errand: Errand) {
+    val d = errand.detail as? ErrandDetail.MailReply ?: return
+    val colors = PcTheme.colors
+    Spacer(Modifier.height(PcSpacing.l))
+    SectionHeader("받은 메일")
+    Text(d.mail.subject, style = PcTheme.type.bodyStrong, color = colors.textPrimary)
+    Spacer(Modifier.height(PcSpacing.xxs))
+    Text(d.mail.summary, style = PcTheme.type.body, color = colors.textSecondary)
+    Spacer(Modifier.height(PcSpacing.l))
+    SectionHeader("보낼 답장")
+    PcCard(Modifier.fillMaxWidth()) {
+        Text(d.draft, style = PcTheme.type.bodyLarge, color = colors.textPrimary)
+    }
+    Spacer(Modifier.height(PcSpacing.xs))
+    Text("내가 한 말 · \"${d.instruction}\"", style = PcTheme.type.bodySmall, color = colors.textSecondary)
 }
 
 @Composable

@@ -12,6 +12,10 @@ import ai.pitcrew.app.domain.Store
 import java.io.IOException
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.data.mock.MockChargerCatalog
+import ai.pitcrew.app.data.mock.MockMailService
+import ai.pitcrew.app.data.mock.MockMeetupService
+import ai.pitcrew.app.errand.MailReplyUseCase
+import ai.pitcrew.app.errand.MeetupUseCase
 import ai.pitcrew.app.errand.ChargeAndDineUseCase
 import ai.pitcrew.app.errand.LateArrivalUseCase
 import ai.pitcrew.app.errand.UndoUseCase
@@ -48,7 +52,7 @@ class VoiceCommandControllerTest {
 
     private fun controller(scope: CoroutineScope, stores: StoreCatalog = MockStoreCatalog()) = VoiceCommandController(
         speech = speech,
-        interpreter = RuleBasedInterpreter { emptyList() },
+        interpreter = RuleBasedInterpreter({ emptyList() }),
         lateArrival = LateArrivalUseCase(
             { route },
             errands,
@@ -58,6 +62,8 @@ class VoiceCommandControllerTest {
         pickup = PickupUseCase({ route }, stores, errands) { now },
         charging = ChargeAndDineUseCase({ route }, MockChargerCatalog(), { 18 }, errands) { now },
         undo = UndoUseCase(errands) { now },
+        meetup = MeetupUseCase(InMemoryContactRepository(), MockMeetupService({ emptyList() }) { now }, { null }, errands) { now },
+        mail = MailReplyUseCase(MockMailService(emptyList()), errands),
         scope = scope,
         listenTimeoutMillis = 5_000,
     )

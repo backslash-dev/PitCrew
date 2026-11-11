@@ -4,12 +4,15 @@ import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
 import ai.pitcrew.app.data.mock.MockChargerCatalog
+import ai.pitcrew.app.data.mock.MockMailService
+import ai.pitcrew.app.errand.MailReplyUseCase
 import ai.pitcrew.app.data.mock.MockOrderHistory
 import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.data.mock.MockStoreCatalog
 import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.Mail
 import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.errand.ChargeAndDineUseCase
 import ai.pitcrew.app.errand.LateArrivalUseCase
@@ -58,6 +61,7 @@ class ProactiveAssistantTest {
     private val reservations = InMemoryReservationRepository(listOf(dinner))
     private val speaker = FakeSpeaker()
     private val speech = FakeSpeech()
+    private var mailbox = MockMailService(emptyList())
     private val confirmer = VoiceConfirmer(speaker, speech, listenMillis = 5_000, speakStartMillis = 100, speakMaxMillis = 100)
 
     private fun assistant(scope: CoroutineScope, orders: MockOrderHistory = MockOrderHistory(emptyList())) = ProactiveAssistant(
@@ -72,11 +76,12 @@ class ProactiveAssistantTest {
         lateArrival = LateArrivalUseCase({ route }, errands, reservations, InMemoryContactRepository()) { now },
         pickup = PickupUseCase({ route }, MockStoreCatalog(), errands) { now },
         charging = ChargeAndDineUseCase({ route }, MockChargerCatalog(), { battery }, errands) { now },
+        mails = mailbox,
+        mailReply = MailReplyUseCase(mailbox, errands),
         confirmer = confirmer,
         now = { now },
     )
 
-    /** 질문을 말하는 중에 [answer]로 답한다. null이면 답하지 않는다. */
     private suspend fun TestScope.tickAnswering(assistant: ProactiveAssistant, answer: String?) = async { assistant.tick() }.let { result ->
         runCurrent()
         answer?.let(confirmer::answer)
@@ -151,6 +156,30 @@ class ProactiveAssistantTest {
         assertNull(tickAnswering(a, null))
         assertTrue(speaker.spoken.isEmpty())
     }
+
+    @Test
+    fun `경로가 없어도 새 메일을 읽어 주고, 답할 말을 들으면 보내지 않고 초안만 만든다`() = runTest {
+        route = null
+        mailbox = MockMailService(listOf(Mail("m1", "정하윤", "h@example.com", "회의 시간", "회의를 11시로 옮겨도 될지 묻는 메일이에요", now.minusMinutes(3))))
+        val a = assistant(backgroundScope)
+        val drafted = tickAnswering(a, "괜찮다고 해 줘")!!
+        assertEquals("정하윤님 메일이 왔어요. 회의를 11시로 옮겨도 될지 묻는 메일이에요. 답장하려면 하실 말을 해 주세요.", speaker.spoken.first())
+        assertEquals("답장을 써 뒀어요. 차를 세우면 화면에서 확인하고 보낼 수 있어요.", speaker.spoken.last())
+        assertEquals(ErrandState.AWAITING_APPROVAL, drafted.state)
+        assertTrue((drafted.detail as ErrandDetail.MailReply).draft.startsWith("정하윤님, 말씀하신 대로"))
+        assertNull(tickAnswering(a, null))
+    }
+
+    @Test
+    fun `메일에 아니라고 하면 초안을 만들지 않고 다시 읽지 않는다`() = runTest {
+        route = null
+        mailbox = MockMailService(listOf(Mail("m1", "정하윤", "h@example.com", "회의 시간", "요약", now.minusMinutes(3))))
+        val a = assistant(backgroundScope)
+        assertNull(tickAnswering(a, "아니 됐어"))
+        assertTrue(errands.errands.value.isEmpty())
+        assertNull(tickAnswering(a, null))
+        assertEquals(1, speaker.spoken.size)
+    }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -167,7 +196,7 @@ class VoiceConfirmerTest {
         val speech = FakeSpeech()
         val confirmer = VoiceConfirmer(FakeSpeaker(), speech, listenMillis = 5_000, speakStartMillis = 100, speakMaxMillis = 100)
         val answer = async { confirmer.ask("바꿀까요?") }
-        // 질문을 말한 뒤(최대 0.2초) 듣는 중에 답한다. 듣기 제한(5초)을 넘기지 않게 시간을 조금만 보낸다
+        // 질문 발화(최대 0.2초) 뒤, 듣기 제한(5초) 안에 답한다
         advanceTimeBy(500)
         assertTrue(confirmer.listening.value)
         speech.result.value = SpeechResult("네 바꿔줘", isFinal = true)

@@ -46,8 +46,8 @@
                 <action android:name="ai.pitcrew.app.NOTIFY_LATE_ARRIVAL" />
                 <action android:name="ORDER_PICKUP_ON_ROUTE" />
                 <action android:name="ai.pitcrew.app.ORDER_PICKUP_ON_ROUTE" />
-                <action android:name="CANCEL_LAST_ERRAND" />
-                <action android:name="ai.pitcrew.app.CANCEL_LAST_ERRAND" />
+                <action android:name="HANDLE_PITCREW_REQUEST" />
+                <action android:name="ai.pitcrew.app.HANDLE_PITCREW_REQUEST" />
             </intent-filter>
         </receiver>
     </application>

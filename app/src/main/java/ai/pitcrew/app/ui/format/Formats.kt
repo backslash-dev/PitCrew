@@ -30,10 +30,16 @@ fun relativeLabel(time: LocalDateTime, now: LocalDateTime): String {
     }
 }
 
-/** 오늘이면 null, 그 외에는 "내일"·"어제"·"M월 d일". */
 fun dayLabel(date: LocalDate, today: LocalDate): String? = when (date) {
     today -> null
     today.plusDays(1) -> "내일"
     today.minusDays(1) -> "어제"
     else -> date.format(DateTimeFormatter.ofPattern("M월 d일"))
+}
+
+/** 받침에 맞춘 목적격 조사. 한글로 끝나지 않으면 받침 없는 쪽으로 본다. */
+fun String.withObjectParticle(): String {
+    val last = trimEnd().lastOrNull() ?: return this
+    val hasFinal = last in '가'..'힣' && (last - '가') % 28 != 0
+    return this + if (hasFinal) "을" else "를"
 }

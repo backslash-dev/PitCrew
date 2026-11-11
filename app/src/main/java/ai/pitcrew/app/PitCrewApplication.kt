@@ -5,6 +5,8 @@ import ai.pitcrew.app.data.ChargerCatalog
 import ai.pitcrew.app.data.ContactRepository
 import ai.pitcrew.app.data.ErrandRunner
 import ai.pitcrew.app.data.ErrandService
+import ai.pitcrew.app.data.MailService
+import ai.pitcrew.app.data.MeetupService
 import ai.pitcrew.app.data.OrderHistory
 import ai.pitcrew.app.data.ReservationRepository
 import ai.pitcrew.app.data.StoreCatalog
@@ -13,6 +15,8 @@ import ai.pitcrew.app.data.local.FileErrandStore
 import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
 import ai.pitcrew.app.data.mock.MockChargerCatalog
+import ai.pitcrew.app.data.mock.MockMailService
+import ai.pitcrew.app.data.mock.MockMeetupService
 import ai.pitcrew.app.data.mock.MockOrderHistory
 import ai.pitcrew.app.data.mock.MockStepExecutor
 import ai.pitcrew.app.data.mock.MockStoreCatalog
@@ -20,12 +24,17 @@ import ai.pitcrew.app.data.mock.SampleData
 import ai.pitcrew.app.data.remote.PitCrewApi
 import ai.pitcrew.app.data.remote.RemoteChargerCatalog
 import ai.pitcrew.app.data.remote.RemoteContactRepository
+import ai.pitcrew.app.data.remote.RemoteMailService
+import ai.pitcrew.app.data.remote.RemoteMeetupService
 import ai.pitcrew.app.data.remote.RemoteOrderHistory
 import ai.pitcrew.app.data.remote.RemoteReservationRepository
 import ai.pitcrew.app.data.remote.RemoteStepExecutor
 import ai.pitcrew.app.data.remote.RemoteStoreCatalog
 import ai.pitcrew.app.errand.CancelLastErrandHandler
 import ai.pitcrew.app.errand.ChargeAndDineUseCase
+import ai.pitcrew.app.errand.DriverRequestHandler
+import ai.pitcrew.app.errand.MailReplyUseCase
+import ai.pitcrew.app.errand.MeetupUseCase
 import ai.pitcrew.app.errand.LateArrivalHandler
 import ai.pitcrew.app.errand.LateArrivalUseCase
 import ai.pitcrew.app.errand.PickupOnRouteHandler
@@ -49,7 +58,7 @@ import java.io.File
 import java.time.LocalDateTime
 
 class PitCrewApplication : Application() {
-    // 놓친 예외 하나로 앱 전체가 종료되지 않게 기록만 하고 넘긴다. 각 기능은 자기 오류를 먼저 처리해야 한다
+    // 놓친 예외 하나로 앱 전체가 종료되지 않게 기록만 한다
     val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> Log.e("PitCrewApplication", "uncaught in app scope", e) },
     )
@@ -57,7 +66,7 @@ class PitCrewApplication : Application() {
     val platform: PlatformServices by lazy { PlatformServices(this) }
     val preferences: AppPreferences by lazy { AppPreferences(this) }
 
-    /** 서버 주소가 없으면(release 기본값) 앱 안 목업으로 동작한다. debug는 에뮬레이터 호스트의 로컬 서버를 쓴다. */
+    /** 서버 주소가 없으면(release 기본값) 앱 안 목업으로 동작한다. */
     private val api: PitCrewApi? by lazy {
         BuildConfig.SERVER_URL.takeIf { it.isNotBlank() }?.let { PitCrewApi(it, BuildConfig.API_TOKEN) }
     }
@@ -71,6 +80,10 @@ class PitCrewApplication : Application() {
     }
     val stores: StoreCatalog by lazy { api?.let(::RemoteStoreCatalog) ?: MockStoreCatalog() }
     private val chargers: ChargerCatalog by lazy { api?.let(::RemoteChargerCatalog) ?: MockChargerCatalog() }
+    private val mockMeetups: MockMeetupService by lazy { MockMeetupService({ reservations.reservations.value }) }
+    private val mockMail: MockMailService by lazy { MockMailService.demo(LocalDateTime.now()) }
+    private val meetups: MeetupService by lazy { api?.let(::RemoteMeetupService) ?: mockMeetups }
+    val mails: MailService by lazy { api?.let(::RemoteMailService) ?: mockMail }
     private val orderHistory: OrderHistory by lazy { api?.let(::RemoteOrderHistory) ?: MockOrderHistory.routine(LocalDateTime.now()) }
 
     private val waypoints = object : WaypointEditor {
@@ -81,9 +94,9 @@ class PitCrewApplication : Application() {
     val errands: ErrandService by lazy {
         val remote = api
         val executor = if (remote != null) {
-            RemoteStepExecutor(remote, reloadReservations = { reservations.refresh() }, waypoints = waypoints)
+            RemoteStepExecutor(remote, reloadReservations = { reservations.refresh() }, waypoints = waypoints, reloadMails = { mails.refreshNow() })
         } else {
-            MockStepExecutor(waypoints)
+            MockStepExecutor(waypoints, mockMeetups, reservations, mockMail)
         }
         // 목업은 처리 시간이 없으므로 진행이 보이도록 단계 사이를 띄운다
         ErrandRunner(executor, stepDelayMillis = if (remote != null) 0 else 600, workScope = scope, store = FileErrandStore(File(filesDir, "errands.json")))
@@ -97,15 +110,26 @@ class PitCrewApplication : Application() {
         ChargeAndDineUseCase(platform.navigation::fetchDestination, chargers, { platform.battery.stateOfChargePercent.value }, errands)
     }
     val undo: UndoUseCase by lazy { UndoUseCase(errands) }
+    val meetup: MeetupUseCase by lazy { MeetupUseCase(contacts, meetups, { platform.location.location.value }, errands) }
+    val mailReply: MailReplyUseCase by lazy { MailReplyUseCase(mails, errands) }
+
+    private val interpreter: RuleBasedInterpreter by lazy {
+        RuleBasedInterpreter(
+            storeNames = { stores.candidatesOnRoute().map { it.displayName } },
+            contactNames = { contacts.ensureLoaded(); contacts.contacts.value.map { it.name } },
+        )
+    }
 
     val voiceCommands: VoiceCommandController by lazy {
         VoiceCommandController(
             speech = platform.voiceInput,
-            interpreter = RuleBasedInterpreter { stores.candidatesOnRoute().map { it.displayName } },
+            interpreter = interpreter,
             lateArrival = lateArrival,
             pickup = pickup,
             charging = charging,
             undo = undo,
+            meetup = meetup,
+            mail = mailReply,
             scope = scope,
         )
     }
@@ -127,16 +151,30 @@ class PitCrewApplication : Application() {
             lateArrival = lateArrival,
             pickup = pickup,
             charging = charging,
+            mails = mails,
+            mailReply = mailReply,
             confirmer = confirmer,
         )
     }
 
+    private val lateHandler by lazy { LateArrivalHandler(lateArrival) }
+    private val pickupHandler by lazy { PickupOnRouteHandler(pickup) }
+
     val gleo: GleoActionDispatcher by lazy {
         GleoActionDispatcher(
             mapOf(
-                GleoFunction.NOTIFY_LATE_ARRIVAL to LateArrivalHandler(lateArrival),
-                GleoFunction.ORDER_PICKUP_ON_ROUTE to PickupOnRouteHandler(pickup),
-                GleoFunction.CANCEL_LAST_ERRAND to CancelLastErrandHandler(undo),
+                GleoFunction.NOTIFY_LATE_ARRIVAL to lateHandler,
+                GleoFunction.ORDER_PICKUP_ON_ROUTE to pickupHandler,
+                GleoFunction.HANDLE_PITCREW_REQUEST to DriverRequestHandler(
+                    interpreter = interpreter,
+                    errands = errands,
+                    undo = CancelLastErrandHandler(undo),
+                    lateArrival = lateHandler,
+                    pickup = pickupHandler,
+                    meetup = meetup,
+                    mail = mailReply,
+                    charging = charging,
+                ),
             ),
         )
     }

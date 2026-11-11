@@ -8,6 +8,9 @@ import ai.pitcrew.app.domain.ErrandDetail
 import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
 import ai.pitcrew.app.domain.ErrandStep
+import ai.pitcrew.app.domain.Mail
+import ai.pitcrew.app.domain.MeetupMode
+import ai.pitcrew.app.domain.MeetupPlace
 import ai.pitcrew.app.domain.NearbyRestaurant
 import ai.pitcrew.app.domain.StepState
 import ai.pitcrew.app.domain.Store
@@ -20,16 +23,12 @@ import java.io.IOException
 import java.time.LocalDateTime
 import java.time.LocalTime
 
-/** 작업 목록을 앱을 다시 켜도 남게 저장한다. 되돌리기·도착 안내·"또 늦음" 판단이 이 기록을 쓴다. */
 interface ErrandStore {
     fun load(): List<Errand>
     fun save(errands: List<Errand>)
 }
 
-/**
- * 앱 내부 저장소의 JSON 파일. 임시 파일에 쓴 뒤 바꿔 끼워 쓰는 도중 종료돼도 파일이 깨지지 않게 한다.
- * 파일이 깨졌거나 형식이 바뀌어 읽지 못하면 빈 목록으로 시작한다.
- */
+/** 임시 파일에 쓴 뒤 교체해 도중 종료돼도 깨지지 않게 한다. 읽지 못하면 빈 목록으로 시작한다. */
 class FileErrandStore(private val file: File) : ErrandStore {
     override fun load(): List<Errand> {
         if (!file.exists()) return emptyList()
@@ -124,7 +123,7 @@ object ErrandJson {
             .put("estimatedArrival", d.estimatedArrival.toString())
             .put("delayMinutes", d.delayMinutes)
             .put("proposedTime", d.proposedTime.toString())
-            .put("companions", JSONArray(d.companions.map { JSONObject().put("id", it.id).put("name", it.name).put("phone", it.phone) }))
+            .put("companions", JSONArray(d.companions.map(::contact)))
             .put("followUp", d.followUp)
         is ErrandDetail.Pickup -> JSONObject()
             .put("type", "pickup")
@@ -139,6 +138,24 @@ object ErrandJson {
             .putOpt("batteryPercent", d.batteryPercent)
             .put("chargeMinutes", d.chargeMinutes)
             .put("arriveAt", d.arriveAt.toString())
+        is ErrandDetail.Meetup -> JSONObject()
+            .put("type", "meetup")
+            .put("contact", contact(d.contact))
+            .put("mode", d.mode.name)
+            .putOpt("place", d.place?.let { JSONObject().put("id", it.id).put("name", it.name).put("latitude", it.latitude).put("longitude", it.longitude) })
+            .putOpt("meetAt", d.meetAt?.toString())
+            .putOpt("userTravelMinutes", d.userTravelMinutes)
+            .putOpt("peerTravelMinutes", d.peerTravelMinutes)
+            .putOpt("preferredAt", d.preferredAt?.toString())
+            .putOpt("latitude", d.latitude)
+            .putOpt("longitude", d.longitude)
+        is ErrandDetail.MailReply -> JSONObject()
+            .put("type", "mail")
+            .put("mail", JSONObject()
+                .put("id", d.mail.id).put("senderName", d.mail.senderName).put("senderEmail", d.mail.senderEmail)
+                .put("subject", d.mail.subject).put("summary", d.mail.summary).put("receivedAt", d.mail.receivedAt.toString()))
+            .put("instruction", d.instruction)
+            .put("draft", d.draft)
     }
 
     private fun detail(o: JSONObject): ErrandDetail = when (val type = o.getString("type")) {
@@ -149,9 +166,7 @@ object ErrandJson {
             estimatedArrival = LocalDateTime.parse(o.getString("estimatedArrival")),
             delayMinutes = o.getLong("delayMinutes"),
             proposedTime = LocalTime.parse(o.getString("proposedTime")),
-            companions = o.getJSONArray("companions").let { a ->
-                (0 until a.length()).map { i -> a.getJSONObject(i).let { Contact(it.getString("id"), it.getString("name"), it.getString("phone")) } }
-            },
+            companions = o.getJSONArray("companions").let { a -> (0 until a.length()).map { i -> contact(a.getJSONObject(i)) } },
             followUp = o.optBoolean("followUp"),
         )
         "pickup" -> ErrandDetail.Pickup(o.getString("item"), store(o.getJSONObject("store")), LocalTime.parse(o.getString("readyAt")))
@@ -163,8 +178,33 @@ object ErrandJson {
             chargeMinutes = o.getInt("chargeMinutes"),
             arriveAt = LocalTime.parse(o.getString("arriveAt")),
         )
+        "meetup" -> ErrandDetail.Meetup(
+            contact = contact(o.getJSONObject("contact")),
+            mode = MeetupMode.valueOf(o.getString("mode")),
+            place = o.optJSONObject("place")?.let { MeetupPlace(it.getString("id"), it.getString("name"), it.getDouble("latitude"), it.getDouble("longitude")) },
+            meetAt = o.optStringOrNull("meetAt")?.let(LocalDateTime::parse),
+            userTravelMinutes = if (o.has("userTravelMinutes")) o.getInt("userTravelMinutes") else null,
+            peerTravelMinutes = if (o.has("peerTravelMinutes")) o.getInt("peerTravelMinutes") else null,
+            preferredAt = o.optStringOrNull("preferredAt")?.let(LocalDateTime::parse),
+            latitude = if (o.has("latitude")) o.getDouble("latitude") else null,
+            longitude = if (o.has("longitude")) o.getDouble("longitude") else null,
+        )
+        "mail" -> o.getJSONObject("mail").let { m ->
+            ErrandDetail.MailReply(
+                mail = Mail(
+                    m.getString("id"), m.getString("senderName"), m.getString("senderEmail"),
+                    m.getString("subject"), m.getString("summary"), LocalDateTime.parse(m.getString("receivedAt")),
+                ),
+                instruction = o.getString("instruction"),
+                draft = o.getString("draft"),
+            )
+        }
         else -> throw IllegalArgumentException("unknown errand type $type")
     }
+
+    private fun contact(c: Contact) = JSONObject().put("id", c.id).put("name", c.name).put("phone", c.phone)
+
+    private fun contact(o: JSONObject) = Contact(o.getString("id"), o.getString("name"), o.getString("phone"))
 
     private fun store(s: Store) = JSONObject()
         .put("id", s.id).put("name", s.name).put("branch", s.branch)
