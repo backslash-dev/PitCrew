@@ -5,7 +5,7 @@
 | 경로 | 내용 |
 | --- | --- |
 | `app/` | Pleos Connect(AAOS, Android 14) 앱. Kotlin · Jetpack Compose |
-| `server/` | 일행·예약·매장·주문·알림·충전소·줄서기 API. Node · TypeScript · Fastify · MySQL |
+| `server/` | 일행·예약·매장·주문·알림·충전소·줄서기·약속 조율·메일 API. Node · TypeScript · Fastify · MySQL |
 | `scripts/` | 에뮬레이터 실행, Virtual Console(차량 상태 주입) 보조 스크립트 |
 
 ## 설치 파일(APK)
@@ -30,10 +30,12 @@ cd server && pnpm install && pnpm db:up && pnpm seed && pnpm dev
 ```
 
 - 서버는 기본 `127.0.0.1:3000`에서 뜨고, debug 앱은 에뮬레이터 안에서 `http://10.0.2.2:3000`으로 붙는다. 서버 주소를 비우면(`-Ppitcrew.serverUrl=`) 앱 안 목업으로 동작한다.
-- DB는 Docker의 MySQL 8.4(호스트 3308)다. 서버가 뜰 때 `migrations/`를 순서대로 적용하고, `pnpm seed`는 지금 시각 기준의 시연용 일행·예약을 넣는다.
+- DB는 Docker의 MySQL 8.4(호스트 3308)다. 서버가 뜰 때 `migrations/`를 순서대로 적용하고, `pnpm seed`는 지금 시각 기준의 시연용 일행·예약·일행 위치와 비는 시간·메일 한 통을 넣는다. 시연 중 새 메일은 `pnpm mail:new`로 넣는다.
 - 운영 배포 시 `DATABASE_URL`, `API_TOKEN`(16자 이상, 필수)을 환경변수로 준다. 루프백이 아닌 `HOST`에서는 토큰 없이 시작하지 않는다. 앱은 `-Ppitcrew.serverUrl=… -Ppitcrew.apiToken=…`로 빌드한다.
 - 선택 환경변수: `RATE_LIMIT_PER_MINUTE`(기본 120), `NOTIFY_LIMIT_PER_MINUTE`(문자 발송, 기본 10), `GATEWAY_TIMEOUT_MS`(외부 시스템 호출 제한, 기본 5000), `TRUST_PROXY`(프록시 뒤 배포 시 `true`).
-- 주문·줄서기·문자·예약 변경은 `Idempotency-Key` 헤더를 받는다. 같은 키로 다시 보내면 처음 결과를 돌려주고 외부 시스템에 다시 요청하지 않는다. 앱은 작업 id와 단계로 키를 만든다.
+- 약속 조율(`/v1/meetups`): 일행의 위치와 비는 시간을 에이전트(있으면)나 문자 답장(없으면)으로 받아, 더 오래 걸리는 쪽의 이동 시간이 가장 짧은 곳과 다른 예약을 피한 시각을 정한다. 잡은 약속은 예약 목록에 함께 보이고, 알리기·취소는 일행에게도 전한다.
+- 메일(`/v1/mails`): 요약은 처음 조회 때 한 번 만들어 저장하고, 답장 초안은 말한 지시로 만든다(지금은 템플릿, LLM으로 바꿀 자리). 보내기는 사용자가 확인한 본문만 보낸다.
+- 주문·줄서기·문자·예약 변경·약속·메일 답장은 `Idempotency-Key` 헤더를 받는다. 같은 키로 다시 보내면 처음 결과를 돌려주고 외부 시스템에 다시 요청하지 않는다. 앱은 작업 id와 단계로 키를 만든다.
 - 외부 시스템 호출은 트랜잭션 밖에서 하고 앞뒤로 상태를 남긴다(예: 주문 PENDING → ACCEPTED/REJECTED/UNKNOWN). 응답이 없으면 504와 함께 결과 미확인(UNKNOWN)으로 기록한다.
 - release 서명: `~/.gradle/gradle.properties`에 `pitcrew.signing.storeFile`, `pitcrew.signing.storePassword`, `pitcrew.signing.keyAlias`, `pitcrew.signing.keyPassword`를 넣으면 `assembleRelease`가 서명한다.
 
@@ -67,7 +69,7 @@ cd server && pnpm typecheck && pnpm test
 
 ## Gleo 연동
 
-`app/src/main/assets/schema.json`에 함수 3개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`, `CANCEL_LAST_ERRAND`)를 정의했고(규격상 최대 3개), `GleoActionReceiver`가 방송(component `service`)으로 받는다. 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
+`app/src/main/assets/schema.json`에 함수 3개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`, `HANDLE_PITCREW_REQUEST`)를 정의했고(규격상 최대 3개), `GleoActionReceiver`가 방송(component `service`)으로 받는다. `HANDLE_PITCREW_REQUEST`는 운전자가 한 말 전체(`request`)를 받아 앱이 해석해 되돌리기·약속 조율·메일 답장·충전으로 나눈다(지각·픽업으로 해석되면 해당 처리기로 넘긴다). 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
 
 마이크 없이 Gleo에 발화를 넣을 수 있다(에뮬레이터 Gleo의 테스트 입력).
 
@@ -85,12 +87,14 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 
 - 지각 대응, 경로상 픽업: Gleo 음성 또는 주차 중 앱의 "말하기"(STT)로 요청하고, 주행 중에는 음성, 주차 중에는 화면 탭으로 승인한다.
 - 픽업 매장은 후보 중에서 바꿀 수 있고, 매장 3분·800m 이내에 다가가면 TTS로 안내한다.
-- 먼저 묻기(설정에서 끌 수 있음): 1분마다 경로·배터리·주문 이력을 보고 PitCrew가 TTS로 먼저 묻고, 앱이 직접 "응/아니"를 듣는다. 답이 없으면 카드로 남는다.
+- 먼저 묻기(설정에서 끌 수 있음): 1분마다 경로·배터리·주문 이력·메일함을 보고 PitCrew가 TTS로 먼저 묻고, 앱이 직접 "응/아니"를 듣는다. 답이 없으면 카드로 남는다.
   - 늦음 감지: 지금 경로로 3시간 안 예약에 5분 넘게 늦으면 예약 변경을 제안한다. 한 번 미룬 예약에 또 늦으면 "한 번 더 미뤘어요" 안내로 다시 제안한다.
   - 충전 + 줄서기: 배터리 20% 이하이면 빈자리 있는 경로상 충전소와, 충전 시간(80%까지, 차량 용량 가정값)에 맞는 근처 식당 줄서기를 제안한다. 주차 중에는 "충전하면서 밥 먹을래"로도 시킨다.
   - 단골 루틴: 최근 14일 중 이틀 넘게 지금 시간대(±1시간)에 같은 메뉴를 픽업했으면 "오늘도 주문할까요?"를 묻는다.
+- 약속 조율: "피트크루 앱으로 민수랑 중간에서 보자"라고 하면 일행의 에이전트와 위치·빈 시간을 주고받아, 두 사람 중 더 오래 걸리는 쪽이 가장 짧은 곳과 내 예약과 겹치지 않는 시각을 고른다. 승인하면 예약하고 에이전트에 확정을 전한다. 에이전트가 없는 일행은 문자로 위치·시간을 물어 답을 받은 뒤 장소를 정하고 문자로 알린다(지금은 에이전트·답장 모두 서버 목업).
+- 운전 중 업무(메일): 새 메일이 오면 요약을 읽어 주고, 답할 말("괜찮다고 해")을 들으면 답장 초안을 만든다. Gleo("피트크루 앱으로 방금 메일 괜찮다고 답장해")로도 시킨다. 초안은 음성으로 승인할 수 없고, 정차한 뒤 화면에서 내용을 확인하고 "보내기"를 눌러야 보낸다. 요약·초안은 지금 의도별 틀(목업)이며, 서버의 `MailAssistant` 구현을 LLM으로 바꾸면 된다.
 - 되돌리기: 끝낸 지 3분 안의 작업은 Gleo("피트크루 앱으로 방금 거 취소해"), 앱 음성, 화면 버튼으로 되돌린다. 예약은 원래 시각으로 돌리고 일행에게 정정 안내를 보내며, 주문·줄서기는 취소하고 넣었던 경유지를 뺀다.
-- 예약 변경·알림 발송·주문·줄서기·매장/충전소 조회는 서버가 처리한다. 식당·매장·줄서기·문자 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청·취소 이력은 DB에 남는다.
+- 예약 변경·알림 발송·주문·줄서기·매장/충전소 조회·약속 조율·메일은 서버가 처리한다. 식당·매장·줄서기·문자·상대 에이전트·메일 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청·취소 이력은 DB에 남는다.
 - 주행 중에는 조작 요소 없는 주행 화면으로 바뀐다(MainActivity에 DO 선언).
 
 ## 시연 영상

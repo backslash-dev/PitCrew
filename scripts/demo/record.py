@@ -1,10 +1,6 @@
 """PitCrew 시연 영상을 장면별로 녹화한다.
 
-에뮬레이터·로컬 서버·Gleo를 실제로 구동한다. 음성은 Gleo 테스트 입력(ai.umos.intent.action.ASR)으로 넣고,
-Gleo가 실제로 한 말은 로그에서 뽑아 자막 데이터(scenes.json)로 남긴다. Gleo 반응이 기대와 다르면 그 장면만 다시 찍는다.
-
 사용: python3 scripts/demo/record.py [출력 폴더]
-전제: 에뮬레이터 부팅, 서버 실행(127.0.0.1:3000), debug APK 설치.
 """
 from __future__ import annotations
 
@@ -49,7 +45,6 @@ def device_time() -> str:
 
 
 def wait_for(pattern: str, timeout: float, since: str) -> re.Match[str] | None:
-    """since(기기 시각) 이후 로그에서 pattern이 나올 때까지 기다린다."""
     deadline = time.time() + timeout
     regex = re.compile(pattern)
     while time.time() < deadline:
@@ -83,12 +78,10 @@ def find_text(text: str) -> tuple[int, int] | None:
 
 
 def debug(action: str, *extras: str) -> None:
-    """debug 빌드 전용 방송(먼저 묻기 확인·답 넣기·주기 확인 끄기)."""
     shell(" ".join(["am broadcast", "-a", f"ai.pitcrew.app.debug.{action}", *extras, "-n", f"{PKG}/.debug.DebugVoiceReceiver"]))
 
 
 def device_time_after(match: re.Match[str]) -> str:
-    """로그 줄 앞의 기기 시각. 그 줄 이후만 보도록 since로 쓴다."""
     line_start = match.string.rfind("\n", 0, match.start()) + 1
     return match.string[line_start:line_start + 18]
 
@@ -102,7 +95,7 @@ def open_navi() -> None:
 
 
 def gleo_lines(log: str) -> list[str]:
-    """Gleo가 말한 문장들. 스트리밍 응답은 조각을 이어 붙이고, 고정 응답은 textToSpeech를 쓴다."""
+    """스트리밍 응답은 조각을 이어 붙이고, 고정 응답은 textToSpeech를 쓴다."""
     lines: list[str] = []
     current = ""
     for line in log.splitlines():
@@ -170,7 +163,6 @@ class Recorder:
 
 
 def scene(rec: Recorder, scenes: list[dict], name: str, title: str, body) -> None:
-    """body가 True를 돌려줄 때까지 MAX_TRIES번 찍는다."""
     for attempt in range(1, MAX_TRIES + 1):
         marker = f"PITCREW_DEMO_{name}_{attempt}_{int(time.time())}"
         shell(f"log -t PitCrewDemo {marker}")
@@ -188,7 +180,6 @@ def scene(rec: Recorder, scenes: list[dict], name: str, title: str, body) -> Non
 
 
 def optional_scene(rec: Recorder, scenes: list[dict], name: str, title: str, body) -> None:
-    """상황이 맞을 때만 생기는 장면. 한 번만 시도하고 안 되면 빼고 넘어간다."""
     shell(f"log -t PitCrewDemo PITCREW_DEMO_{name}_1_{int(time.time())}")
     since = device_time()
     rec.start(name)
@@ -217,7 +208,6 @@ def main() -> None:
     rec = Recorder(out)
     scenes: list[dict] = []
 
-    # 시연 데이터: ETA(약 40분)보다 이른 10분 단위 예약을 잡아 15~25분 지각이 나게 한다
     # 앱은 기기 시간대로 시각을 해석하므로 예약·발화 시각도 기기 시간대로 계산한다
     zone = ZoneInfo(shell("getprop persist.sys.timezone").strip() or "UTC")
     now = datetime.now(zone)
@@ -235,7 +225,7 @@ def main() -> None:
     vconsole("park")
     vconsole("battery", "72")
     shell(f"am force-stop --user 10 {PKG}")
-    # 앞선 촬영의 경로·경유지가 남지 않게 안내를 끝낸다(내비를 강제 종료하면 이후 경로 안내가 바로 끝나 버린다)
+    # 내비를 강제 종료하면 이후 경로 안내가 바로 끝나므로 안내 종료로 이전 경로를 지운다
     open_navi()
     time.sleep(3)
     end = find_text("안내 종료")
@@ -244,7 +234,7 @@ def main() -> None:
         time.sleep(2)
     open_app()
     time.sleep(6)
-    # 장면 순서는 녹화가 정한다. 1분 주기 확인이 엉뚱한 장면에 끼지 않게 끈다
+    # 1분 주기 확인이 엉뚱한 장면에 끼지 않게 끈다
     debug("PERIODIC", "--ez", "on", "false")
 
     def home(rec: Recorder, since: str) -> bool:
@@ -263,7 +253,6 @@ def main() -> None:
         return True
 
     def proactive(rec: Recorder, since: str, reply: str, expect: str) -> bool:
-        """PitCrew가 먼저 묻는 장면. 질문을 다 말한 뒤 운전자 답을 넣고 결과 안내까지 기다린다."""
         # 경유지가 막 바뀌면 내비 ETA가 몇 초 뒤에 갱신되므로 질문이 나올 때까지 몇 번 다시 보게 한다
         asked = None
         for _ in range(6):
@@ -322,7 +311,7 @@ def main() -> None:
 
     def undo(rec: Recorder, since: str) -> bool:
         rec.mark("caption", "잘못 시켰다면 3분 안에 말로 되돌려요")
-        if not gleo_errand(rec, since, "CANCEL_LAST_ERRAND", "피트크루 앱으로 방금 거 취소해줘", "응, 피트크루 앱으로 취소해줘"):
+        if not gleo_errand(rec, since, "HANDLE_PITCREW_REQUEST", "피트크루 앱으로 방금 거 취소해줘", "응, 피트크루 앱으로 취소해줘"):
             return False
         open_navi()
         rec.mark("caption", "주문이 취소되고 경유지도 빠졌어요")
@@ -376,7 +365,6 @@ def main() -> None:
     scene(rec, scenes, "09-battery", "충전하는 동안 줄서기", battery)
     scene(rec, scenes, "10-parked", "주차한 뒤", parked)
 
-    # Gleo 실제 발화를 장면 이벤트에 채운다
     log = logcat()
     for s in scenes:
         # 재촬영했다면 마지막 시도의 로그를 쓴다
