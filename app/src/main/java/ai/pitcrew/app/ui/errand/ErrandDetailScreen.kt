@@ -22,6 +22,8 @@ import ai.pitcrew.app.ui.format.minutesLabel
 import ai.pitcrew.app.ui.theme.PcSpacing
 import ai.pitcrew.app.ui.theme.PcTheme
 import ai.pitcrew.app.ui.theme.WindowWidth
+import ai.pitcrew.app.ui.timeline.TripTimeline
+import ai.pitcrew.app.ui.timeline.TripTimelineBar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -61,6 +63,7 @@ fun ErrandDetailScreen(
     now: LocalDateTime,
     listening: Boolean,
     onUndo: (String) -> Unit,
+    timeline: TripTimeline? = null,
     storeOptions: List<StoreOption> = emptyList(),
     onSwitchStore: (Store) -> Unit = {},
 ) {
@@ -73,8 +76,18 @@ fun ErrandDetailScreen(
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = PcSpacing.xl)) {
             Text(errand.title(), style = PcTheme.type.headline, color = PcTheme.colors.textPrimary)
             Spacer(Modifier.height(PcSpacing.xs))
-            Text(errand.summary(), style = PcTheme.type.bodyLarge, color = PcTheme.colors.textSecondary)
+            // 끝난 일은 앞으로 할 일(요약) 대신 결과 문장을 보인다
+            Text(
+                errand.outcomeLine() ?: errand.summary(),
+                style = PcTheme.type.bodyLarge,
+                color = if (errand.state == ErrandState.FAILED) PcTheme.colors.negative else PcTheme.colors.textSecondary,
+            )
             Spacer(Modifier.height(PcSpacing.xl))
+            // 이 일이 경로 어디쯤인지 보이게 한다
+            if (timeline != null && errand.isActive) {
+                PcCard(Modifier.fillMaxWidth()) { TripTimelineBar(timeline) }
+                Spacer(Modifier.height(PcSpacing.l))
+            }
 
             val figures: @Composable () -> Unit = { Figures(errand) }
             val timeline: @Composable () -> Unit = {
@@ -82,14 +95,6 @@ fun ErrandDetailScreen(
                     SectionHeader("진행")
                     Spacer(Modifier.height(PcSpacing.s))
                     StepTimeline(errand)
-                    errand.outcomeLine()?.let {
-                        Spacer(Modifier.height(PcSpacing.l))
-                        Text(
-                            it,
-                            style = PcTheme.type.bodyStrong,
-                            color = if (errand.state == ErrandState.FAILED) PcTheme.colors.negative else PcTheme.colors.textPrimary,
-                        )
-                    }
                     // 되돌리기에 실패하면 작업은 완료 상태로 남으므로 실패 사유를 따로 보인다
                     if (errand.state == ErrandState.COMPLETED && errand.undoNote != null) {
                         Spacer(Modifier.height(PcSpacing.s))

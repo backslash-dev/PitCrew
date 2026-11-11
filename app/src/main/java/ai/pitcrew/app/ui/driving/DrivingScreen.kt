@@ -3,6 +3,7 @@ package ai.pitcrew.app.ui.driving
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
+import ai.pitcrew.app.domain.Reservation
 import ai.pitcrew.app.errand.LateArrivalPlanner
 import ai.pitcrew.app.platform.Destination
 import ai.pitcrew.app.ui.errand.outcomeLine
@@ -12,6 +13,8 @@ import ai.pitcrew.app.ui.errand.voiceApprovalHint
 import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.format.minutesLabel
 import ai.pitcrew.app.ui.theme.PcSpacing
+import ai.pitcrew.app.ui.timeline.TripTimeline
+import ai.pitcrew.app.ui.timeline.TripTimelineBar
 import ai.pitcrew.app.ui.theme.PcTheme
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -39,7 +42,7 @@ import java.time.LocalDateTime
  * 움직이는 요소도 없다(주의분산 가이드).
  */
 @Composable
-fun DrivingScreen(destination: Destination?, errands: List<Errand>, now: LocalDateTime, listening: Boolean) {
+fun DrivingScreen(destination: Destination?, errands: List<Errand>, reservations: List<Reservation>, now: LocalDateTime, listening: Boolean) {
     val colors = PcTheme.colors
     val focus = drivingFocus(errands, now)
     Column(
@@ -57,6 +60,12 @@ fun DrivingScreen(destination: Destination?, errands: List<Errand>, now: LocalDa
                     color = colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(PcSpacing.l))
+                // 주행 중에는 늦는 지점과 묶음만 이름표를 단다
+                TripTimelineBar(
+                    TripTimeline.build(now, LateArrivalPlanner.arrivalAt(now, destination.remainTimeSeconds), reservations, errands),
+                    compact = true,
                 )
             } else {
                 Text("경로 없음", style = PcTheme.type.headline, color = colors.textPrimary)

@@ -20,7 +20,10 @@ import ai.pitcrew.app.ui.components.SectionHeader
 import ai.pitcrew.app.ui.components.TextAction
 import ai.pitcrew.app.ui.errand.ErrandCard
 import ai.pitcrew.app.ui.errand.outcomeLine
+import ai.pitcrew.app.ui.errand.shortKind
 import ai.pitcrew.app.ui.errand.title
+import ai.pitcrew.app.ui.timeline.TripTimeline
+import ai.pitcrew.app.ui.timeline.TripTimelineBar
 import ai.pitcrew.app.ui.format.distanceLabel
 import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.format.minutesLabel
@@ -85,7 +88,7 @@ fun HomeScreen(state: HomeState, actions: HomeActions, width: WindowWidth) {
             Text("오늘의 이동", style = PcTheme.type.titleLarge, color = PcTheme.colors.textPrimary, modifier = Modifier.weight(1f))
             // 앱 음성 입력은 주차 중 화면에서만 연다. 주행 중에는 Gleo로 말한다
             if (state.driving.interactionMode == InteractionMode.TOUCH && state.voice == VoiceCommandState.Idle) {
-                PcButton("말로 시키기", actions.startVoice, kind = ButtonKind.BASIC, size = ButtonSize.MEDIUM, icon = Icons.Rounded.Mic)
+                PcButton("말하기", actions.startVoice, kind = ButtonKind.BASIC, size = ButtonSize.MEDIUM, icon = Icons.Rounded.Mic)
             }
         }
         VoiceCommandPanel(
@@ -94,26 +97,18 @@ fun HomeScreen(state: HomeState, actions: HomeActions, width: WindowWidth) {
             onDismiss = actions.dismissVoice,
             modifier = Modifier.padding(bottom = if (state.voice == VoiceCommandState.Idle) 0.dp else PcSpacing.l),
         )
-        when (width) {
-            WindowWidth.EXPANDED -> Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
-                trip(Modifier.weight(0.9f))
-                work(Modifier.weight(1.3f).verticalScroll(rememberScrollState()))
-                today(Modifier.weight(0.9f).verticalScroll(rememberScrollState()))
-            }
-            WindowWidth.MEDIUM -> Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
-                    trip(Modifier.fillMaxWidth())
-                    today(Modifier.fillMaxWidth())
-                }
-                work(Modifier.weight(1.2f).verticalScroll(rememberScrollState()))
-            }
-            WindowWidth.COMPACT -> Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(PcSpacing.l),
-            ) {
-                trip(Modifier.fillMaxWidth())
+        // 경로 전체를 맨 위에 넓게 두고, 그 아래 지금 답할 일과 다가오는 예약을 둔다
+        val scroll = rememberScrollState()
+        Column(Modifier.weight(1f).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
+            trip(Modifier.fillMaxWidth())
+            if (width == WindowWidth.COMPACT) {
                 work(Modifier.fillMaxWidth())
                 today(Modifier.fillMaxWidth())
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
+                    work(Modifier.weight(1.3f))
+                    today(Modifier.weight(1f))
+                }
             }
         }
         Spacer(Modifier.height(PcSpacing.l))
@@ -124,49 +119,51 @@ fun HomeScreen(state: HomeState, actions: HomeActions, width: WindowWidth) {
 private fun TripPanel(state: HomeState, modifier: Modifier) {
     val colors = PcTheme.colors
     PcCard(modifier) {
-        Text("목적지", style = PcTheme.type.label, color = colors.textSecondary)
-        Spacer(Modifier.height(PcSpacing.xs))
         val destination = state.destination
         if (destination == null) {
             Text("경로 없음", style = PcTheme.type.title, color = colors.textPrimary)
-            Spacer(Modifier.height(PcSpacing.s))
+            Spacer(Modifier.height(PcSpacing.xs))
             Text(
                 "내비게이션에서 목적지를 정하면 도착 시간을 기준으로 지각 대응과 픽업 시간을 계산해요.",
                 style = PcTheme.type.body,
                 color = colors.textSecondary,
             )
-        } else {
-            Text(destination.name, style = PcTheme.type.title, color = colors.textPrimary, maxLines = 2)
-            Spacer(Modifier.height(PcSpacing.xl))
-            val arrival = LateArrivalPlanner.arrivalAt(state.now, destination.remainTimeSeconds)
-            Text(arrival.hhmm(), style = PcTheme.type.display, color = colors.textPrimary)
-            Text("도착 예정", style = PcTheme.type.body, color = colors.textSecondary)
-            Spacer(Modifier.height(PcSpacing.l))
-            Hairline()
-            Spacer(Modifier.height(PcSpacing.l))
-            Row(horizontalArrangement = Arrangement.spacedBy(PcSpacing.xxl)) {
-                Column {
-                    Text("남은 시간", style = PcTheme.type.label, color = colors.textSecondary)
-                    Text(minutesLabel(destination.remainTimeSeconds / 60L), style = PcTheme.type.titleSmall, color = colors.textPrimary)
-                }
-                Column {
-                    Text("남은 거리", style = PcTheme.type.label, color = colors.textSecondary)
-                    Text(distanceLabel(destination.remainDistanceMeters), style = PcTheme.type.titleSmall, color = colors.textPrimary)
-                }
-            }
+            return@PcCard
         }
+        val arrival = LateArrivalPlanner.arrivalAt(state.now, destination.remainTimeSeconds)
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "${destination.name}까지 ${minutesLabel(destination.remainTimeSeconds / 60L)}",
+                style = PcTheme.type.title,
+                color = colors.textPrimary,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            Text("도착 ${arrival.hhmm()} · ${distanceLabel(destination.remainDistanceMeters)}", style = PcTheme.type.body, color = colors.textSecondary)
+        }
+        Spacer(Modifier.height(PcSpacing.m))
+        TripTimelineBar(TripTimeline.build(state.now, arrival, state.reservations, state.errands))
     }
 }
 
 @Composable
 private fun WorkPanel(state: HomeState, actions: HomeActions, modifier: Modifier) {
-    val active = state.errands.filter { it.isActive }.sortedBy { it.state.ordinal }
+    // 답할 제안은 한 번에 하나만 보이고 나머지는 "다음"으로 알린다. 진행 중인 일은 그대로 보인다
+    val awaiting = state.errands.filter { it.state == ErrandState.AWAITING_APPROVAL }
+    val active = listOfNotNull(awaiting.firstOrNull()) + state.errands.filter { it.state == ErrandState.IN_PROGRESS }
     val recent = state.errands.filterNot { it.isActive }.take(2)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(PcSpacing.m)) {
         SectionHeader("처리할 일")
         if (active.isEmpty()) {
             VoiceHintCard()
         } else {
+            if (awaiting.size > 1) {
+                Text(
+                    "먼저 답할 일 1/${awaiting.size} · 다음: ${awaiting.drop(1).joinToString(", ") { it.shortKind() }}",
+                    style = PcTheme.type.label,
+                    color = PcTheme.colors.textSecondary,
+                )
+            }
             active.forEach { errand ->
                 ErrandCard(
                     errand,
