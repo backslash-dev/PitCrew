@@ -8,6 +8,14 @@
 | `server/` | 일행·예약·매장·주문·알림·충전소·줄서기 API. Node · TypeScript · Fastify · MySQL |
 | `scripts/` | 에뮬레이터 실행, Virtual Console(차량 상태 주입) 보조 스크립트 |
 
+## 설치 파일(APK)
+
+`release/PitCrew-0.1.0.apk`는 서명한 release 빌드다(APK Signature Scheme v3). 서버 없이 앱 안 목업 데이터로 동작한다.
+
+```bash
+adb install release/PitCrew-0.1.0.apk
+```
+
 ## 요구 사항
 
 - JDK 17, Android SDK(platform 35), Pleos Connect Emulator 2.1.0 AVD
