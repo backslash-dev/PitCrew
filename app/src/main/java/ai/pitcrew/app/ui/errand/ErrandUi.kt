@@ -43,6 +43,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+/** "다음: 충전, 픽업"처럼 짧게 부르는 이름. */
+fun Errand.shortKind(): String = when (detail) {
+    is ErrandDetail.LateArrival -> "지각"
+    is ErrandDetail.Pickup -> "픽업"
+    is ErrandDetail.ChargeAndDine -> "충전"
+}
+
 /** 일행 이름. 셋 이상이면 "김민수 외 2명"으로 줄인다. */
 fun companionNames(companions: List<Contact>): String = when {
     companions.size <= 2 -> companions.joinToString(", ") { it.name }
@@ -144,10 +151,19 @@ fun ErrandCard(
     }
 }
 
-/** PitCrew가 먼저 제안한 일만 따로 표시한다. 시킨 일은 제목만으로 충분하다. */
-const val SUGGESTED_LABEL = "PitCrew가 먼저 물어봤어요"
+/** PitCrew가 먼저 제안한 일에만 붙이는 출처 꼬리표. 시킨 일은 제목만으로 충분하다. */
+const val SUGGESTED_LABEL = "PitCrew 제안"
 
-fun Errand.screenTitle(): String = if (origin == ErrandOrigin.SUGGESTED) "PitCrew가 먼저 물어본 일" else "요청한 일"
+/** 상세 화면 제목. 누가 꺼낸 일인지보다 지금 어떤 상태인지를 보인다(출처는 카드의 [SUGGESTED_LABEL]). */
+fun Errand.screenTitle(): String = when (state) {
+    ErrandState.AWAITING_APPROVAL -> "확인할 일"
+    ErrandState.IN_PROGRESS -> "처리 중인 일"
+    ErrandState.COMPLETED -> "처리한 일"
+    ErrandState.FAILED -> "처리하지 못한 일"
+    ErrandState.CANCELLED -> "되돌린 일"
+    ErrandState.DECLINED -> "거절한 일"
+    ErrandState.EXPIRED -> "넘어간 일"
+}
 
 /** 주차 중에만 탭으로 승인한다. 주행 중이거나 규제 상태를 모르면 음성 승인 안내만 보인다. */
 @Composable

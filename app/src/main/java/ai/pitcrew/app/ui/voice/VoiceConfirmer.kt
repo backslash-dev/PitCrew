@@ -37,7 +37,7 @@ object AnswerClassifier {
 
 /**
  * PitCrew가 먼저 묻는 질문을 TTS로 말하고 STT로 "응/아니"를 듣는다. Gleo를 거치지 않으므로 주행 중에도 손을 쓰지 않는다.
- * 다른 음성 입력(말로 시키기)이 듣는 중이면 묻지 않는다.
+ * 다른 음성 입력("말하기")이 듣는 중이면 묻지 않는다.
  */
 class VoiceConfirmer(
     private val speaker: Speaker,

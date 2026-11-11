@@ -35,7 +35,7 @@ sealed interface VoiceCommandState {
     data class Done(val heard: String?, val message: String, val needsApproval: Boolean) : VoiceCommandState
 }
 
-/** 주차 중 앱 화면에서 말로 시키기. 들은 문장을 해석해 지각 대응·픽업·충전·되돌리기 유스케이스를 실행한다. */
+/** 주차 중 앱 화면의 "말하기". 들은 문장을 해석해 지각 대응·픽업·충전·되돌리기 유스케이스를 실행한다. */
 class VoiceCommandController(
     private val speech: SpeechSource,
     private val interpreter: CommandInterpreter,
