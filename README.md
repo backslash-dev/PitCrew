@@ -18,6 +18,8 @@
 
 ### APK로 바로 실행
 
+Pleos Connect 에뮬레이터를 켠 상태에서 설치한다.
+
 ```bash
 adb install apk/백슬래시파트너스_PitCrew_release.apk
 ```
@@ -34,13 +36,6 @@ cd server && pnpm install && pnpm db:up && pnpm seed && pnpm dev
 
 - 서버는 기본 `127.0.0.1:3000`에서 뜨고, debug 앱은 에뮬레이터 안에서 `http://10.0.2.2:3000`으로 붙는다. 서버 주소를 비우면(`-Ppitcrew.serverUrl=`) 앱 안 목업으로 동작한다.
 - DB는 Docker의 MySQL 8.4(호스트 3308)다. 서버가 뜰 때 `migrations/`를 순서대로 적용하고, `pnpm seed`는 지금 시각 기준의 시연용 일행·예약·일행 위치와 비는 시간·메일 한 통을 넣는다. 시연 중 새 메일은 `pnpm mail:new`로 넣는다.
-- 운영 배포 시 `DATABASE_URL`, `API_TOKEN`(16자 이상, 필수)을 환경변수로 준다. 루프백이 아닌 `HOST`에서는 토큰 없이 시작하지 않는다. 앱은 `-Ppitcrew.serverUrl=… -Ppitcrew.apiToken=…`로 빌드한다.
-- 선택 환경변수: `RATE_LIMIT_PER_MINUTE`(기본 120), `NOTIFY_LIMIT_PER_MINUTE`(문자 발송, 기본 10), `GATEWAY_TIMEOUT_MS`(외부 시스템 호출 제한, 기본 5000), `TRUST_PROXY`(프록시 뒤 배포 시 `true`).
-- 약속 조율(`/v1/meetups`): 일행의 위치와 비는 시간을 에이전트(있으면)나 문자 답장(없으면)으로 받아, 더 오래 걸리는 쪽의 이동 시간이 가장 짧은 곳과 다른 예약을 피한 시각을 정한다. 잡은 약속은 예약 목록에 함께 보이고, 알리기·취소는 일행에게도 전한다.
-- 메일(`/v1/mails`): 요약은 처음 조회 때 한 번 만들어 저장하고, 답장 초안은 말한 지시로 만든다(지금은 템플릿, LLM으로 바꿀 자리). 보내기는 사용자가 확인한 본문만 보낸다.
-- 주문·줄서기·문자·예약 변경·약속·메일 답장은 `Idempotency-Key` 헤더를 받는다. 같은 키로 다시 보내면 처음 결과를 돌려주고 외부 시스템에 다시 요청하지 않는다. 앱은 작업 id와 단계로 키를 만든다.
-- 외부 시스템 호출은 트랜잭션 밖에서 하고 앞뒤로 상태를 남긴다(예: 주문 PENDING → ACCEPTED/REJECTED/UNKNOWN). 응답이 없으면 504와 함께 결과 미확인(UNKNOWN)으로 기록한다.
-- release 서명: `~/.gradle/gradle.properties`에 `pitcrew.signing.storeFile`, `pitcrew.signing.storePassword`, `pitcrew.signing.keyAlias`, `pitcrew.signing.keyPassword`를 넣으면 `assembleRelease`가 서명한다.
 
 차량 상태는 Virtual Console로 바꾼다.
 
@@ -75,6 +70,16 @@ cd app && ./gradlew testDebugUnitTest
 cd server && pnpm typecheck && pnpm test
 ```
 
+## 서버·빌드 참고
+
+- 운영 배포 시 `DATABASE_URL`, `API_TOKEN`(16자 이상, 필수)을 환경변수로 준다. 루프백이 아닌 `HOST`에서는 토큰 없이 시작하지 않는다. 앱은 `-Ppitcrew.serverUrl=… -Ppitcrew.apiToken=…`로 빌드한다.
+- 선택 환경변수: `RATE_LIMIT_PER_MINUTE`(기본 120), `NOTIFY_LIMIT_PER_MINUTE`(문자 발송, 기본 10), `GATEWAY_TIMEOUT_MS`(외부 시스템 호출 제한, 기본 5000), `TRUST_PROXY`(프록시 뒤 배포 시 `true`).
+- 약속 조율(`/v1/meetups`): 일행의 위치와 비는 시간을 에이전트(있으면)나 문자 답장(없으면)으로 받아, 더 오래 걸리는 쪽의 이동 시간이 가장 짧은 곳과 다른 예약을 피한 시각을 정한다. 잡은 약속은 예약 목록에 함께 보이고, 알리기·취소는 일행에게도 전한다.
+- 메일(`/v1/mails`): 요약은 처음 조회 때 한 번 만들어 저장하고, 답장 초안은 말한 지시로 만든다(지금은 템플릿, LLM으로 바꿀 자리). 보내기는 사용자가 확인한 본문만 보낸다.
+- 주문·줄서기·문자·예약 변경·약속·메일 답장은 `Idempotency-Key` 헤더를 받는다. 같은 키로 다시 보내면 처음 결과를 돌려주고 외부 시스템에 다시 요청하지 않는다. 앱은 작업 id와 단계로 키를 만든다.
+- 외부 시스템 호출은 트랜잭션 밖에서 하고 앞뒤로 상태를 남긴다(예: 주문 PENDING → ACCEPTED/REJECTED/UNKNOWN). 응답이 없으면 504와 함께 결과 미확인(UNKNOWN)으로 기록한다.
+- release 서명: `~/.gradle/gradle.properties`에 `pitcrew.signing.storeFile`, `pitcrew.signing.storePassword`, `pitcrew.signing.keyAlias`, `pitcrew.signing.keyPassword`를 넣으면 `assembleRelease`가 서명한다.
+
 ## 플랫폼 연동 현황
 
 앱 첫 화면은 SDK 연결 진단 화면이다. 각 연동은 `app/src/main/java/ai/pitcrew/app/platform/`에 있다.
@@ -90,7 +95,7 @@ cd server && pnpm typecheck && pnpm test
 
 ## Gleo 연동
 
-`app/src/main/assets/schema.json`에 함수 3개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`, `HANDLE_PITCREW_REQUEST`)를 정의했고(규격상 최대 3개), `GleoActionReceiver`가 방송(component `service`)으로 받는다. `HANDLE_PITCREW_REQUEST`는 운전자가 한 말 전체(`request`)를 받아 앱이 해석해 되돌리기·약속 조율·메일 답장·충전으로 나눈다(지각·픽업으로 해석되면 해당 처리기로 넘긴다). 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
+`app/src/main/assets/schema.json`에 함수 3개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`, `HANDLE_PITCREW_REQUEST`)를 정의했고(규격상 최대 3개), `GleoActionReceiver`가 방송(component `service`)으로 받는다. 실제 차량에서는 Pleos의 스키마 검토·승인 뒤에 Gleo 연동이 켜진다(공모전 기간에는 승인을 신청할 수 없다). 에뮬레이터에서는 승인 없이 동작하며, Gleo 없이도 주차 중에는 앱의 "말하기"(SpeechToText SDK)로 모든 기능을 시킬 수 있고, 주행 중에는 PitCrew가 먼저 묻고 음성으로 답을 받는다. `HANDLE_PITCREW_REQUEST`는 운전자가 한 말 전체(`request`)를 받아 앱이 해석해 되돌리기·약속 조율·메일 답장·충전으로 나눈다(지각·픽업으로 해석되면 해당 처리기로 넘긴다). 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
 
 마이크 없이 Gleo에 발화를 넣을 수 있다(에뮬레이터 Gleo의 테스트 입력).
 
