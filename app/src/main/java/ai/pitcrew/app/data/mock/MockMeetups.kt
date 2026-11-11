@@ -36,7 +36,9 @@ class MockMeetupService(
         val peerTravel = MeetupPlanner.travelMinutes(peer.latitude, peer.longitude, place.latitude, place.longitude)
         val at = now()
         val meetAt = MeetupPlanner.meetAt(at, preferredAt, maxOf(userTravel, peerTravel), at, reservations().map { it.time })
-        if (Duration.between(at, meetAt) > FREE_FOR) throw MeetupUnavailableException("${contact.name}님이 그 시간에는 어렵다고 해요")
+        if (Duration.between(at, meetAt) > FREE_FOR) {
+            throw MeetupUnavailableException(if (preferredAt != null) "${contact.name}님이 그 시간에는 어렵다고 해요" else "${contact.name}님이 오늘은 시간이 안 된다고 해요")
+        }
         return MeetupPlan(mode, place, meetAt, userTravel, peerTravel)
     }
 
