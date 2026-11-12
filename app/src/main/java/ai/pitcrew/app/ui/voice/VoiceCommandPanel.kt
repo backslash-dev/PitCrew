@@ -40,6 +40,10 @@ fun VoiceCommandPanel(state: VoiceCommandState, onCancel: () -> Unit, onDismiss:
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
+                    is VoiceCommandState.Confirming -> {
+                        Text("“${state.heard}”", style = PcTheme.type.label, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(state.question, style = PcTheme.type.titleSmall, color = colors.textPrimary, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
                     is VoiceCommandState.Working -> {
                         Text("“${state.heard}”", style = PcTheme.type.label, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("확인하는 중이에요", style = PcTheme.type.title, color = colors.textPrimary)
@@ -54,7 +58,7 @@ fun VoiceCommandPanel(state: VoiceCommandState, onCancel: () -> Unit, onDismiss:
                 }
             }
             when (state) {
-                is VoiceCommandState.Listening, is VoiceCommandState.Working ->
+                is VoiceCommandState.Listening, is VoiceCommandState.Working, is VoiceCommandState.Confirming ->
                     PcButton("취소", onCancel, kind = ButtonKind.BASIC, size = ButtonSize.MEDIUM)
                 is VoiceCommandState.Done -> PcButton("닫기", onDismiss, kind = ButtonKind.BASIC, size = ButtonSize.MEDIUM)
                 VoiceCommandState.Idle -> Unit

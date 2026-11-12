@@ -9,6 +9,7 @@
             <intent-filter>
                 <action android:name="ai.pitcrew.app.debug.CHECK_NOW" />
                 <action android:name="ai.pitcrew.app.debug.ANSWER" />
+                <action android:name="ai.pitcrew.app.debug.SAY" />
                 <action android:name="ai.pitcrew.app.debug.PERIODIC" />
                 <action android:name="ai.pitcrew.app.debug.ROUTE" />
             </intent-filter>

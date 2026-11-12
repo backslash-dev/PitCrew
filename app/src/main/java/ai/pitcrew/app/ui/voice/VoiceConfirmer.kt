@@ -50,6 +50,9 @@ class VoiceConfirmer(
     private val _listening = MutableStateFlow(false)
     val listening: StateFlow<Boolean> = _listening.asStateFlow()
 
+    /** 질문을 말하거나 답을 듣는 중. 이때는 다른 음성 입력을 시작하지 않는다. */
+    val busy: Boolean get() = mutex.isLocked
+
     /** 시연 녹화와 디버그 빌드의 방송 입력이 쓴다. */
     fun answer(text: String) {
         injected.tryEmit(text)

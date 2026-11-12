@@ -105,7 +105,15 @@ fun PitCrewApp(app: PitCrewApplication, locationGranted: Boolean, onRequestLocat
 
     // 규제 상태를 모를 때(차량 서비스 연결·재연결 중)도 주행 중일 수 있으므로 입력 화면 대신 주행 화면을 보인다
     if (driving.requiresDistractionOptimization != false) {
-        DrivingScreen(destination, errands, reservations, now, listening)
+        DrivingScreen(
+            destination, errands, reservations, now, listening,
+            voice = voice,
+            // 규제 상태를 모를 때는 조작 요소를 두지 않는다
+            canTalk = driving.requiresDistractionOptimization == true,
+            onTalk = app.voiceCommands::start,
+            onCancelTalk = app.voiceCommands::cancel,
+            onDismissTalk = app.voiceCommands::dismiss,
+        )
         return
     }
 

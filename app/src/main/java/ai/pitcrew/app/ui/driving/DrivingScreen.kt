@@ -3,10 +3,13 @@ package ai.pitcrew.app.ui.driving
 import ai.pitcrew.app.domain.Errand
 import ai.pitcrew.app.domain.ErrandOrigin
 import ai.pitcrew.app.domain.ErrandState
-import ai.pitcrew.app.domain.needsTouchApproval
 import ai.pitcrew.app.domain.Reservation
+import ai.pitcrew.app.domain.needsTouchApproval
 import ai.pitcrew.app.errand.LateArrivalPlanner
 import ai.pitcrew.app.platform.Destination
+import ai.pitcrew.app.ui.components.ButtonKind
+import ai.pitcrew.app.ui.components.ButtonSize
+import ai.pitcrew.app.ui.components.PcButton
 import ai.pitcrew.app.ui.errand.outcomeLine
 import ai.pitcrew.app.ui.errand.progressLine
 import ai.pitcrew.app.ui.errand.title
@@ -14,9 +17,10 @@ import ai.pitcrew.app.ui.errand.voiceApprovalHint
 import ai.pitcrew.app.ui.format.hhmm
 import ai.pitcrew.app.ui.format.minutesLabel
 import ai.pitcrew.app.ui.theme.PcSpacing
+import ai.pitcrew.app.ui.theme.PcTheme
 import ai.pitcrew.app.ui.timeline.TripTimeline
 import ai.pitcrew.app.ui.timeline.TripTimelineBar
-import ai.pitcrew.app.ui.theme.PcTheme
+import ai.pitcrew.app.ui.voice.VoiceCommandState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -26,22 +30,43 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.time.Duration
 import java.time.LocalDateTime
+import kotlinx.coroutines.delay
 
-/** 1~2초 안에 읽을 핵심만 두고 조작·움직이는 요소는 두지 않는다(주의분산 가이드). */
+/** 1~2초 안에 읽을 핵심만 두고, 조작은 음성을 시작하는 큰 버튼 하나만 둔다(주의분산 가이드: 터치 최소화, 음성 우선). */
 @Composable
-fun DrivingScreen(destination: Destination?, errands: List<Errand>, reservations: List<Reservation>, now: LocalDateTime, listening: Boolean) {
+fun DrivingScreen(
+    destination: Destination?,
+    errands: List<Errand>,
+    reservations: List<Reservation>,
+    now: LocalDateTime,
+    listening: Boolean,
+    voice: VoiceCommandState = VoiceCommandState.Idle,
+    canTalk: Boolean = false,
+    onTalk: () -> Unit = {},
+    onCancelTalk: () -> Unit = {},
+    onDismissTalk: () -> Unit = {},
+) {
     val colors = PcTheme.colors
+    // 주행 중에는 결과를 오래 붙잡지 않는다. 같은 내용은 말로도 알렸다
+    LaunchedEffect(voice) {
+        if (voice is VoiceCommandState.Done) {
+            delay(VOICE_RESULT_MILLIS)
+            onDismissTalk()
+        }
+    }
     val focus = drivingFocus(errands, now)
     Column(
         Modifier.fillMaxSize().background(colors.background).padding(horizontal = 64.dp, vertical = 48.dp),
@@ -68,7 +93,10 @@ fun DrivingScreen(destination: Destination?, errands: List<Errand>, reservations
             } else {
                 Text("경로 없음", style = PcTheme.type.headline, color = colors.textPrimary)
             }
-            if (focus != null) {
+            if (voice != VoiceCommandState.Idle) {
+                Spacer(Modifier.height(PcSpacing.xxl))
+                VoiceStatus(voice)
+            } else if (focus != null) {
                 Spacer(Modifier.height(PcSpacing.xxl))
                 Text(focus.title(), style = PcTheme.type.titleLarge, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 (focus.progressLine() ?: focus.outcomeLine())?.let {
@@ -77,18 +105,45 @@ fun DrivingScreen(destination: Destination?, errands: List<Errand>, reservations
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PcSpacing.m)) {
-            Icon(Icons.Rounded.Mic, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(40.dp))
-            Text(
-                drivingHint(focus, now, listening),
-                style = PcTheme.type.bodyLarge,
-                color = colors.textSecondary,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(PcSpacing.l)) {
+            if (canTalk) {
+                val talking = voice is VoiceCommandState.Listening || voice is VoiceCommandState.Working || voice is VoiceCommandState.Confirming
+                PcButton(
+                    if (talking) "그만 듣기" else "말하기",
+                    if (talking) onCancelTalk else onTalk,
+                    kind = if (talking) ButtonKind.BASIC else ButtonKind.FILLED,
+                    size = ButtonSize.LARGE,
+                    icon = Icons.Rounded.Mic,
+                    modifier = Modifier.width(TALK_BUTTON_WIDTH),
+                    enabled = !listening,
+                )
+            } else {
+                Icon(Icons.Rounded.Mic, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(40.dp))
+                Text(drivingHint(focus, now, listening), style = PcTheme.type.bodyLarge, color = colors.textSecondary)
+            }
         }
     }
 }
 
+@Composable
+private fun VoiceStatus(voice: VoiceCommandState) {
+    val colors = PcTheme.colors
+    val (caption, main) = when (voice) {
+        is VoiceCommandState.Listening -> "듣고 있어요" to voice.partial.ifBlank { "하실 일을 말해 주세요" }
+        is VoiceCommandState.Working -> "“${voice.heard}”" to "확인하는 중이에요"
+        is VoiceCommandState.Confirming -> "“${voice.heard}”" to voice.question
+        is VoiceCommandState.Done -> (voice.heard?.let { "“$it”" } ?: "") to voice.message
+        VoiceCommandState.Idle -> return
+    }
+    if (caption.isNotEmpty()) Text(caption, style = PcTheme.type.titleSmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Text(main, style = PcTheme.type.titleLarge, color = colors.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+}
+
+private const val VOICE_RESULT_MILLIS = 6_000L
+private val TALK_BUTTON_WIDTH = 320.dp
+
 internal fun drivingHint(focus: Errand?, now: LocalDateTime, listening: Boolean): String = when {
+    listening -> "듣고 있어요 · \"응\" 또는 \"아니\"라고 답하세요"
     focus == null -> "Gleo를 부르고 \"피트크루 앱으로…\"라고 말하세요"
     focus.state == ErrandState.AWAITING_APPROVAL && focus.detail.needsTouchApproval -> focus.voiceApprovalHint(listening)
     focus.state == ErrandState.AWAITING_APPROVAL && focus.origin == ErrandOrigin.SUGGESTED -> focus.voiceApprovalHint(listening)

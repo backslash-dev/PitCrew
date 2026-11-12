@@ -1,5 +1,7 @@
 package ai.pitcrew.app.ui.voice
 
+import kotlinx.coroutines.test.TestScope
+import ai.pitcrew.app.domain.ApprovalChannel
 import ai.pitcrew.app.data.mock.InMemoryContactRepository
 import ai.pitcrew.app.data.mock.InMemoryReservationRepository
 import ai.pitcrew.app.data.ErrandRunner
@@ -49,6 +51,9 @@ class VoiceCommandControllerTest {
     private val route = Destination("강남역", 45 * 60, 13_000)
     private val errands = ErrandRunner(MockStepExecutor(FakeWaypoints { true }), now = { now }, stepDelayMillis = 0)
     private val speech = FakeSpeech()
+    private val speaker = FakeSpeaker()
+    private val confirmer = VoiceConfirmer(speaker, speech, listenMillis = 5_000, speakStartMillis = 100, speakMaxMillis = 100)
+    private var driving = false
 
     private fun controller(scope: CoroutineScope, stores: StoreCatalog = MockStoreCatalog()) = VoiceCommandController(
         speech = speech,
@@ -64,6 +69,9 @@ class VoiceCommandControllerTest {
         undo = UndoUseCase(errands) { now },
         meetup = MeetupUseCase(InMemoryContactRepository(), MockMeetupService({ emptyList() }) { now }, { null }, errands) { now },
         mail = MailReplyUseCase(MockMailService(emptyList()), errands),
+        errands = errands,
+        confirmer = confirmer,
+        driving = { driving },
         scope = scope,
         listenTimeoutMillis = 5_000,
     )
@@ -116,5 +124,73 @@ class VoiceCommandControllerTest {
         speech.result.value = SpeechResult("아메리카노 픽업해줘", true)
         runCurrent()
         assertEquals("처리하지 못했어요. 서버에 연결하지 못했어요", (c.state.value as VoiceCommandState.Done).message)
+    }
+
+    // 컨트롤러가 backgroundScope에서 돌아 advanceUntilIdle이 그 안의 대기 시간을 진행시키지 않는다
+    private fun TestScope.settle() {
+        advanceTimeBy(10_000)
+        runCurrent()
+    }
+
+    private fun TestScope.say(c: VoiceCommandController, text: String) {
+        c.start()
+        runCurrent()
+        speech.result.value = SpeechResult(text, true)
+        runCurrent()
+    }
+
+    @Test
+    fun `주행 중에 말로 시키면 그 자리에서 음성으로 묻고 응이라고 하면 처리한다`() = runTest {
+        driving = true
+        val c = controller(backgroundScope)
+        say(c, "가는 길에 아메리카노 픽업해줘")
+        confirmer.answer("응 그렇게 해줘")
+        settle()
+        val errand = errands.errands.value.single()
+        assertEquals(ErrandState.COMPLETED, errand.state)
+        assertEquals(ApprovalChannel.VOICE, errand.approvedVia)
+        assertTrue(speaker.spoken.first().endsWith("받도록 주문할까요?"))
+        assertTrue((c.state.value as VoiceCommandState.Done).message.contains("주문하고 경유지에 넣었어요"))
+    }
+
+    @Test
+    fun `주행 중 아니라고 하면 거절하고, 답이 없으면 카드로 남긴다`() = runTest {
+        driving = true
+        val c = controller(backgroundScope)
+        say(c, "가는 길에 아메리카노 픽업해줘")
+        confirmer.answer("아니 됐어")
+        settle()
+        assertEquals(ErrandState.DECLINED, errands.errands.value.single().state)
+
+        c.dismiss()
+        say(c, "가는 길에 라테 픽업해줘")
+        settle()
+        assertEquals(ErrandState.AWAITING_APPROVAL, errands.errands.value.first().state)
+        assertTrue((c.state.value as VoiceCommandState.Done).message.startsWith("답이 없어 카드로 남겨 뒀어요"))
+    }
+
+    @Test
+    fun `주차 중에는 묻지 않고 화면 승인을 기다린다`() = runTest {
+        val c = controller(backgroundScope)
+        say(c, "가는 길에 아메리카노 픽업해줘")
+        settle()
+        assertEquals(ErrandState.AWAITING_APPROVAL, errands.errands.value.single().state)
+        assertTrue(speaker.spoken.isEmpty())
+    }
+
+    @Test
+    fun `주행 중 방금 거 취소해라고 하면 무엇을 되돌릴지 묻고 응이면 되돌린다`() = runTest {
+        driving = true
+        val c = controller(backgroundScope)
+        say(c, "가는 길에 아메리카노 픽업해줘")
+        confirmer.answer("응")
+        settle()
+        c.dismiss()
+        say(c, "방금 거 취소해")
+        assertTrue((c.state.value as VoiceCommandState.Confirming).question.endsWith("되돌릴까요?"))
+        confirmer.answer("응")
+        settle()
+        assertEquals(ErrandState.CANCELLED, errands.errands.value.single().state)
+        assertEquals(ApprovalChannel.VOICE, errands.errands.value.single().undoneVia)
     }
 }

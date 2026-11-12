@@ -130,6 +130,9 @@ class PitCrewApplication : Application() {
             undo = undo,
             meetup = meetup,
             mail = mailReply,
+            errands = errands,
+            confirmer = confirmer,
+            driving = { platform.drivingState.state.value.requiresDistractionOptimization != false },
             scope = scope,
         )
     }
