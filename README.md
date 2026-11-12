@@ -95,7 +95,7 @@ cd server && pnpm typecheck && pnpm test
 
 ## Gleo 연동
 
-`app/src/main/assets/schema.json`에 함수 3개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`, `HANDLE_PITCREW_REQUEST`)를 정의했고(규격상 최대 3개), `GleoActionReceiver`가 방송(component `service`)으로 받는다. 실제 차량에서는 Pleos의 스키마 검토·승인 뒤에 Gleo 연동이 켜진다(공모전 기간에는 승인을 신청할 수 없다). 에뮬레이터에서는 승인 없이 동작하며, Gleo 없이도 주차 중에는 앱의 "말하기"(SpeechToText SDK)로 모든 기능을 시킬 수 있고, 주행 중에는 PitCrew가 먼저 묻고 음성으로 답을 받는다. `HANDLE_PITCREW_REQUEST`는 운전자가 한 말 전체(`request`)를 받아 앱이 해석해 되돌리기·약속 조율·메일 답장·충전으로 나눈다(지각·픽업으로 해석되면 해당 처리기로 넘긴다). 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
+`app/src/main/assets/schema.json`에 함수 3개(`NOTIFY_LATE_ARRIVAL`, `ORDER_PICKUP_ON_ROUTE`, `HANDLE_PITCREW_REQUEST`)를 정의했고(규격상 최대 3개), `GleoActionReceiver`가 방송(component `service`)으로 받는다. 실제 차량에서는 Pleos의 스키마 검토·승인 뒤에 Gleo 연동이 켜진다(공모전 기간에는 승인을 신청할 수 없다). 에뮬레이터에서는 승인 없이 동작하며, Gleo 없이도 앱의 "말하기"(SpeechToText SDK)로 모든 기능을 시킬 수 있다. 주행 중에는 앱이 질문을 말로 되묻고 "응/아니"를 들어 승인한다. `HANDLE_PITCREW_REQUEST`는 운전자가 한 말 전체(`request`)를 받아 앱이 해석해 되돌리기·약속 조율·메일 답장·충전으로 나눈다(지각·픽업으로 해석되면 해당 처리기로 넘긴다). 확정이 필요한 작업은 `asking`으로 되물은 뒤, 사용자가 승인하면 Gleo가 `confirmedTime`/`confirmed`를 붙여 다시 호출한다.
 
 마이크 없이 Gleo에 발화를 넣을 수 있다(에뮬레이터 Gleo의 테스트 입력).
 
@@ -111,7 +111,7 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 
 ## 앱 기능
 
-- 지각 대응, 경로상 픽업: Gleo 음성 또는 주차 중 앱의 "말하기"(STT)로 요청하고, 주행 중에는 음성, 주차 중에는 화면 탭으로 승인한다.
+- 지각 대응, 경로상 픽업: Gleo 음성 또는 앱의 "말하기"(STT)로 요청하고, 주행 중에는 음성, 주차 중에는 화면 탭으로 승인한다. 주행 중 "말하기"로 시키면 앱이 TTS로 "…할까요?"라고 묻고 답을 들어 그 자리에서 처리하고 결과를 말로 알린다(메일 답장은 정차 후 화면에서만 보낸다).
 - 픽업 매장은 후보 중에서 바꿀 수 있고, 매장 3분·800m 이내에 다가가면 TTS로 안내한다.
 - 먼저 묻기(설정에서 끌 수 있음): 1분마다 경로·배터리·주문 이력·메일함을 보고 PitCrew가 TTS로 먼저 묻고, 앱이 직접 "응/아니"를 듣는다. 답이 없으면 카드로 남는다.
   - 늦음 감지: 지금 경로로 3시간 안 예약에 5분 넘게 늦으면 예약 변경을 제안한다. 한 번 미룬 예약에 또 늦으면 "한 번 더 미뤘어요" 안내로 다시 제안한다.
@@ -121,7 +121,7 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
 - 운전 중 업무(메일): 새 메일이 오면 요약을 읽어 주고, 답할 말("괜찮다고 해")을 들으면 답장 초안을 만든다. Gleo("피트크루 앱으로 방금 메일 괜찮다고 답장해")로도 시킨다. 초안은 음성으로 승인할 수 없고, 정차한 뒤 화면에서 내용을 확인하고 "보내기"를 눌러야 보낸다. 요약·초안은 지금 의도별 틀(목업)이며, 서버의 `MailAssistant` 구현을 LLM으로 바꾸면 된다.
 - 되돌리기: 끝낸 지 3분 안의 작업은 Gleo("피트크루 앱으로 방금 거 취소해"), 앱 음성, 화면 버튼으로 되돌린다. 예약은 원래 시각으로 돌리고 일행에게 정정 안내를 보내며, 주문·줄서기는 취소하고 넣었던 경유지를 뺀다.
 - 예약 변경·알림 발송·주문·줄서기·매장/충전소 조회·약속 조율·메일은 서버가 처리한다. 식당·매장·줄서기·문자·상대 에이전트·메일 연동은 서버의 어댑터 인터페이스 뒤 목업이며, 발송·요청·취소 이력은 DB에 남는다.
-- 주행 중에는 조작 요소 없는 주행 화면으로 바뀐다(MainActivity에 DO 선언).
+- 주행 중에는 주행 화면으로 바뀐다(MainActivity에 DO 선언). 조작은 음성을 시작하는 큰 "말하기" 버튼 하나뿐이고, 주행 규제 상태를 모를 때는 그 버튼도 숨긴다.
 
 ## 에뮬레이터 주의 사항
 
@@ -130,6 +130,7 @@ adb shell "am broadcast -a ai.umos.intent.action.ASR --es ASR '피트크루 앱�
   ```bash
   adb shell am broadcast -a ai.pitcrew.app.debug.CHECK_NOW -n ai.pitcrew.app/.debug.DebugVoiceReceiver
   adb shell am broadcast -a ai.pitcrew.app.debug.ANSWER --es text 응 -n ai.pitcrew.app/.debug.DebugVoiceReceiver
+  adb shell "am broadcast -a ai.pitcrew.app.debug.SAY --es text '민수랑 중간에서 보자' -n ai.pitcrew.app/.debug.DebugVoiceReceiver"   # "말하기"로 듣는 중일 때 말 대신 넣기
   adb shell am broadcast -a ai.pitcrew.app.debug.PERIODIC --ez on false -n ai.pitcrew.app/.debug.DebugVoiceReceiver   # 1분 주기 확인 끄기
   adb shell am broadcast -a ai.pitcrew.app.debug.ROUTE --es name 강남역 --ef lat 37.4979 --ef lon 127.0276 -n ai.pitcrew.app/.debug.DebugVoiceReceiver
   ```
