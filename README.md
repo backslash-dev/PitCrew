@@ -115,3 +115,9 @@ cd server && pnpm install && pnpm db:up && pnpm seed && pnpm dev
 ## APK 파일
 
 - [백슬래시파트너스_PitCrew_release.apk 다운로드](apk/백슬래시파트너스_PitCrew_release.apk?raw=true): 서명한 release 빌드(APK Signature Scheme v3)
+
+## 만든 사람들
+
+**주식회사 백슬래시파트너스 개발팀**이 만들었습니다.
+
+현대자동차 Pleos Connect에서 운전 중 필요한 일을 말로 처리할 수 있도록 PitCrew 앱과 데모를 만들었습니다.
