@@ -54,4 +54,4 @@ cd server && pnpm install && pnpm db:up && pnpm seed && pnpm dev
 
 ## APK 파일
 
-- `apk/백슬래시파트너스_PitCrew_release.apk`: 서명한 release 빌드(APK Signature Scheme v3)
+- [백슬래시파트너스_PitCrew_release.apk 다운로드](apk/백슬래시파트너스_PitCrew_release.apk?raw=true): 서명한 release 빌드(APK Signature Scheme v3)
